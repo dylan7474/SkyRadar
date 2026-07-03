@@ -372,7 +372,7 @@
             </div>
 
             <!-- Simulated cockpit view for selected target -->
-            <div id="cockpit-view" class="absolute bottom-4 left-4 bg-slate-950/90 backdrop-blur-md border border-radar-glow/40 rounded-xl shadow-2xl z-[520] hidden w-[340px] max-w-[calc(100%-2rem)] overflow-hidden pointer-events-auto">
+            <div id="cockpit-view" class="absolute bottom-4 left-4 bg-slate-950/90 backdrop-blur-md border border-radar-glow/40 rounded-xl shadow-2xl z-[520] hidden w-[420px] max-w-[calc(100%-2rem)] overflow-hidden pointer-events-auto">
                 <div class="flex items-center justify-between px-3 py-2 border-b border-radar-border bg-slate-900/90">
                     <div>
                         <h4 class="text-xs font-bold uppercase tracking-[0.18em] text-radar-glow">Simulated Cockpit View</h4>
@@ -386,6 +386,14 @@
                         <span id="cockpit-heading" class="bg-slate-950/75 border border-slate-700 rounded px-1.5 py-0.5">HDG --°</span>
                         <span id="cockpit-range" class="bg-slate-950/75 border border-slate-700 rounded px-1.5 py-0.5">RANGE 15 MI</span>
                     </div>
+                </div>
+                <div class="border-t border-radar-border bg-slate-950 px-3 py-3">
+                    <div class="mb-2 flex items-center justify-between">
+                        <span class="text-[10px] font-bold uppercase tracking-[0.16em] text-radar-glow">Live Flight Instruments</span>
+                        <span id="instrument-source-note" class="text-[9px] text-slate-500 mono">ADS-B derived</span>
+                    </div>
+                    <canvas id="cockpit-instruments" width="780" height="520" class="block w-full h-[260px]" aria-label="Six pack flight instruments based on selected aircraft telemetry"></canvas>
+                    <p class="mt-2 text-[9px] leading-snug text-slate-500">ASI uses ADS-B ground speed as an airspeed proxy. Pitch, bank, and turn rate are estimated from reported climb/descent and heading data because ADS-B usually does not broadcast full attitude telemetry.</p>
                 </div>
                 <div id="cockpit-traffic-list" class="px-3 py-2 text-[10px] text-slate-400 mono border-t border-radar-border bg-slate-950/90">
                     Nearby traffic will appear here.
@@ -577,6 +585,7 @@
         let locationAcquired = false;
         let isSimulatingDemo = false;
         const cockpitRangeMiles = 15;
+        const cockpitTrackHistory = {};
         // Custom SVGs for crisp 2.5D Parallax Markers
         function get2_5DMarkerHTML(plane, colorTheme, stalkHeight) {
             const rotAngle = plane.track !== undefined && plane.track !== null ? Math.round(plane.track) : 0;
@@ -1253,6 +1262,7 @@
                     alt_baro: isEmergency && i === 6 ? 34000 : (Math.random() > 0.8 ? "ground" : Math.floor(25 + Math.random() * 350) * 100),
                     gs: 80 + Math.random() * 450,
                     track: Math.floor(Math.random() * 360),
+                    baro_rate: Math.floor(-18 + Math.random() * 36) * 100,
                     squawk: squawks[i],
                     dbFlags: isMilitary ? 1 : 0,
                     calculatedDistance: distanceMiles,
@@ -1506,6 +1516,7 @@
                 .sort((a, b) => a.distance - b.distance);
 
             drawCockpitCanvas(canvas, selectedPlane, traffic, heading);
+            drawCockpitInstruments(selectedPlane);
             renderCockpitTrafficList(traffic);
             cockpit.classList.remove('hidden');
         }
@@ -1578,6 +1589,148 @@
                 ctx.font = '16px JetBrains Mono, monospace';
                 ctx.fillText(`${distance.toFixed(1)}mi`, x + 10, y + 12);
             });
+        }
+
+
+        function getPlaneAltitudeFeet(plane) {
+            if (plane.alt_baro === 'ground') return 0;
+            return Number.parseFloat(plane.alt_baro ?? plane.alt_geom ?? 0) || 0;
+        }
+
+        function getPlaneVerticalSpeedFpm(plane) {
+            return Number.parseFloat(plane.baro_rate ?? plane.geom_rate ?? 0) || 0;
+        }
+
+        function getEstimatedAttitude(plane) {
+            const hex = plane.hex || 'selected';
+            const now = Date.now();
+            const track = Number.parseFloat(plane.track ?? plane.true_heading ?? plane.mag_heading ?? 0) || 0;
+            const previous = cockpitTrackHistory[hex];
+            cockpitTrackHistory[hex] = { track, timestamp: now };
+
+            let turnRate = 0;
+            if (previous && now > previous.timestamp) {
+                const elapsedSeconds = Math.max((now - previous.timestamp) / 1000, 1);
+                turnRate = normalizeAngle(track - previous.track) / elapsedSeconds;
+            }
+
+            const speed = Math.max(Number.parseFloat(plane.gs ?? 0) || 0, 30);
+            const verticalSpeed = getPlaneVerticalSpeedFpm(plane);
+            const pitch = Math.max(-15, Math.min(15, (verticalSpeed / Math.max(speed * 100, 1)) * 95));
+            const bank = Math.max(-30, Math.min(30, turnRate * 7));
+            return { pitch, bank, turnRate };
+        }
+
+        function drawCockpitInstruments(plane) {
+            const canvas = document.getElementById('cockpit-instruments');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            const speed = Number.parseFloat(plane.gs ?? 0) || 0;
+            const altitude = getPlaneAltitudeFeet(plane);
+            const heading = Number.parseFloat(plane.track ?? plane.true_heading ?? plane.mag_heading ?? 0) || 0;
+            const verticalSpeed = getPlaneVerticalSpeedFpm(plane);
+            const attitude = getEstimatedAttitude(plane);
+            const gauges = [
+                { x: 130, y: 130, title: 'AIRSPEED', subtitle: 'KNOTS', type: 'asi', value: speed, min: 0, max: 500, major: 100 },
+                { x: 390, y: 130, title: 'ATTITUDE', subtitle: 'EST', type: 'attitude', value: attitude },
+                { x: 650, y: 130, title: 'ALTIMETER', subtitle: 'FEET', type: 'altimeter', value: altitude },
+                { x: 130, y: 390, title: 'TURN COORD', subtitle: 'EST', type: 'turn', value: attitude },
+                { x: 390, y: 390, title: 'HEADING', subtitle: 'DEGREES', type: 'heading', value: heading },
+                { x: 650, y: 390, title: 'VSI', subtitle: 'FT/MIN', type: 'vsi', value: verticalSpeed, min: -3000, max: 3000, major: 1000 }
+            ];
+            gauges.forEach(gauge => drawInstrument(ctx, gauge));
+        }
+
+        function drawInstrument(ctx, gauge) {
+            const r = 104;
+            ctx.save();
+            ctx.translate(gauge.x, gauge.y);
+            const bezel = ctx.createRadialGradient(-25, -30, 20, 0, 0, r + 10);
+            bezel.addColorStop(0, '#475569');
+            bezel.addColorStop(0.45, '#111827');
+            bezel.addColorStop(1, '#020617');
+            ctx.fillStyle = bezel;
+            ctx.beginPath();
+            ctx.arc(0, 0, r + 12, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = '#64748b';
+            ctx.lineWidth = 3;
+            ctx.stroke();
+            ctx.fillStyle = '#050816';
+            ctx.beginPath();
+            ctx.arc(0, 0, r, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.clip();
+
+            if (gauge.type === 'attitude') drawAttitudeFace(ctx, gauge.value, r);
+            else if (gauge.type === 'turn') drawTurnCoordinator(ctx, gauge.value, r);
+            else if (gauge.type === 'heading') drawHeadingIndicator(ctx, gauge.value, r);
+            else if (gauge.type === 'altimeter') drawAltimeter(ctx, gauge.value, r);
+            else drawRoundScale(ctx, gauge, r);
+
+            ctx.restore();
+            ctx.save();
+            ctx.translate(gauge.x, gauge.y);
+            ctx.fillStyle = '#e2e8f0';
+            ctx.font = '700 15px JetBrains Mono, monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(gauge.title, 0, 70);
+            ctx.fillStyle = '#94a3b8';
+            ctx.font = '10px JetBrains Mono, monospace';
+            ctx.fillText(gauge.subtitle, 0, 85);
+            ctx.restore();
+        }
+
+        function drawRoundScale(ctx, gauge, r) {
+            const start = 135 * Math.PI / 180;
+            const sweep = 270 * Math.PI / 180;
+            const value = Math.max(gauge.min, Math.min(gauge.max, gauge.value));
+            for (let v = gauge.min; v <= gauge.max; v += gauge.major / 2) {
+                const a = start + ((v - gauge.min) / (gauge.max - gauge.min)) * sweep;
+                const major = v % gauge.major === 0;
+                ctx.strokeStyle = '#e5e7eb'; ctx.lineWidth = major ? 3 : 1;
+                ctx.beginPath(); ctx.moveTo(Math.cos(a) * (r - 18), Math.sin(a) * (r - 18)); ctx.lineTo(Math.cos(a) * (r - (major ? 34 : 27)), Math.sin(a) * (r - (major ? 34 : 27))); ctx.stroke();
+                if (major) { ctx.fillStyle = '#e5e7eb'; ctx.font = '13px JetBrains Mono, monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(String(Math.abs(v / (gauge.type === 'vsi' ? 1000 : 1))), Math.cos(a) * (r - 48), Math.sin(a) * (r - 48)); }
+            }
+            const angle = start + ((value - gauge.min) / (gauge.max - gauge.min)) * sweep;
+            drawNeedle(ctx, angle, r - 42, gauge.type === 'vsi' ? '#F59E0B' : '#EF4444');
+            ctx.fillStyle = '#f8fafc'; ctx.font = '700 18px JetBrains Mono, monospace'; ctx.textAlign = 'center'; ctx.fillText(Math.round(gauge.value).toLocaleString(), 0, 34);
+        }
+
+        function drawNeedle(ctx, angle, length, color) {
+            ctx.strokeStyle = color; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(Math.cos(angle) * length, Math.sin(angle) * length); ctx.stroke();
+            ctx.fillStyle = '#e5e7eb'; ctx.beginPath(); ctx.arc(0, 0, 7, 0, Math.PI * 2); ctx.fill();
+        }
+
+        function drawAttitudeFace(ctx, attitude, r) {
+            ctx.save(); ctx.rotate(-attitude.bank * Math.PI / 180); ctx.translate(0, attitude.pitch * 3.2);
+            ctx.fillStyle = '#2563eb'; ctx.fillRect(-r, -r * 2, r * 2, r * 2);
+            ctx.fillStyle = '#92400e'; ctx.fillRect(-r, 0, r * 2, r * 2);
+            ctx.strokeStyle = '#f8fafc'; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(-r, 0); ctx.lineTo(r, 0); ctx.stroke();
+            ctx.strokeStyle = 'rgba(248,250,252,.75)'; ctx.lineWidth = 2;
+            [-20,-10,10,20].forEach(p => { const y = -p * 3.2; ctx.beginPath(); ctx.moveTo(-26, y); ctx.lineTo(26, y); ctx.stroke(); });
+            ctx.restore();
+            ctx.strokeStyle = '#facc15'; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(-48, 0); ctx.lineTo(-14, 0); ctx.moveTo(14, 0); ctx.lineTo(48, 0); ctx.moveTo(0, 8); ctx.lineTo(0, -10); ctx.stroke();
+            ctx.fillStyle = '#f8fafc'; ctx.font = '12px JetBrains Mono, monospace'; ctx.textAlign = 'center'; ctx.fillText(`${Math.round(attitude.pitch)}° pitch`, 0, -66); ctx.fillText(`${Math.round(attitude.bank)}° bank`, 0, 54);
+        }
+
+        function drawTurnCoordinator(ctx, attitude, r) {
+            drawAttitudeFace(ctx, { pitch: 0, bank: attitude.bank }, r);
+            ctx.fillStyle = '#e2e8f0'; ctx.font = '12px JetBrains Mono, monospace'; ctx.textAlign = 'center'; ctx.fillText(`${attitude.turnRate.toFixed(1)}°/s`, 0, 34);
+        }
+
+        function drawHeadingIndicator(ctx, heading, r) {
+            ctx.save(); ctx.rotate(-heading * Math.PI / 180);
+            for (let d = 0; d < 360; d += 10) { const a = d * Math.PI / 180 - Math.PI / 2; const major = d % 30 === 0; ctx.strokeStyle = '#e5e7eb'; ctx.lineWidth = major ? 3 : 1; ctx.beginPath(); ctx.moveTo(Math.cos(a)*(r-14), Math.sin(a)*(r-14)); ctx.lineTo(Math.cos(a)*(r-(major?30:22)), Math.sin(a)*(r-(major?30:22))); ctx.stroke(); if (major) { ctx.save(); ctx.translate(Math.cos(a)*(r-45), Math.sin(a)*(r-45)); ctx.rotate(heading * Math.PI / 180); ctx.fillStyle = '#e5e7eb'; ctx.font = '13px JetBrains Mono, monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(d === 0 ? 'N' : d === 90 ? 'E' : d === 180 ? 'S' : d === 270 ? 'W' : String(d/10), 0, 0); ctx.restore(); } }
+            ctx.restore(); ctx.fillStyle = '#ef4444'; ctx.beginPath(); ctx.moveTo(0, -82); ctx.lineTo(-8, -62); ctx.lineTo(8, -62); ctx.closePath(); ctx.fill(); ctx.fillStyle = '#f8fafc'; ctx.font = '700 20px JetBrains Mono, monospace'; ctx.textAlign = 'center'; ctx.fillText(String(Math.round(heading)).padStart(3,'0') + '°', 0, 12);
+        }
+
+        function drawAltimeter(ctx, altitude, r) {
+            drawRoundScale(ctx, { value: altitude % 1000, min: 0, max: 1000, major: 100, type: 'alt' }, r);
+            drawNeedle(ctx, 135 * Math.PI / 180 + ((altitude % 10000) / 10000) * 270 * Math.PI / 180, r - 58, '#38bdf8');
+            ctx.fillStyle = '#f8fafc'; ctx.font = '700 17px JetBrains Mono, monospace'; ctx.textAlign = 'center'; ctx.fillText(Math.round(altitude).toLocaleString(), 0, 34);
         }
 
         function renderCockpitTrafficList(traffic) {
