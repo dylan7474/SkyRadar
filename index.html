@@ -405,7 +405,7 @@
                     </div>
                 </div>
                 <div class="relative bg-gradient-to-b from-sky-950 via-slate-950 to-emerald-950">
-                    <canvas id="cockpit-canvas" width="680" height="400" class="block w-full h-[200px]" aria-label="Pilot-relative HUD showing nearby traffic with altitude separation and range cues"></canvas>
+                    <canvas id="cockpit-canvas" width="680" height="400" class="block w-full h-[200px]" aria-label="Pilot-relative cockpit view showing banked horizon and nearby traffic cues"></canvas>
                     <div class="absolute left-3 bottom-2 right-3 flex items-center justify-between text-[10px] mono text-slate-300 pointer-events-none">
                         <span id="cockpit-heading" class="bg-slate-950/75 border border-slate-700 rounded px-1.5 py-0.5">HDG --°</span>
                         <span id="cockpit-range" class="bg-slate-950/75 border border-slate-700 rounded px-1.5 py-0.5">RANGE 15 MI</span>
@@ -1577,21 +1577,7 @@
             ctx.clearRect(0, 0, width, height);
 
             const attitude = getEstimatedAttitude(selectedPlane);
-            const horizonY = Math.round(height * 0.48 + attitude.pitch * 2.4);
-            const skyGradient = ctx.createLinearGradient(0, 0, 0, horizonY);
-            skyGradient.addColorStop(0, '#075985');
-            skyGradient.addColorStop(0.7, '#0f172a');
-            skyGradient.addColorStop(1, '#1e293b');
-            ctx.fillStyle = skyGradient;
-            ctx.fillRect(0, 0, width, horizonY);
-            const groundGradient = ctx.createLinearGradient(0, horizonY, 0, height);
-            groundGradient.addColorStop(0, '#0f766e');
-            groundGradient.addColorStop(0.35, '#064e3b');
-            groundGradient.addColorStop(1, '#020617');
-            ctx.fillStyle = groundGradient;
-            ctx.fillRect(0, horizonY, width, height);
-
-            drawHudAttitudeMeter(ctx, width, height, attitude);
+            drawBankedCockpitHorizon(ctx, width, height, attitude);
             drawHudCompassTape(ctx, width, heading);
             drawHudTrafficScope(ctx, width, height);
 
@@ -1600,67 +1586,39 @@
             drawOwnshipSymbol(ctx, width, height);
         }
 
-        function drawHudAttitudeMeter(ctx, width, height, attitude) {
-            const meterX = width - 78;
-            const meterTop = 84;
-            const meterHeight = 178;
+        function drawBankedCockpitHorizon(ctx, width, height, attitude) {
             const pitch = Math.max(-15, Math.min(15, attitude.pitch || 0));
-            const bank = Math.max(-30, Math.min(30, attitude.bank || 0));
+            const bank = Math.max(-45, Math.min(45, attitude.bank || 0));
+            const horizonOffset = pitch * 2.4;
+            const fillSize = Math.hypot(width, height) * 1.25;
 
             ctx.save();
-            ctx.fillStyle = 'rgba(2, 6, 23, 0.58)';
-            ctx.strokeStyle = 'rgba(16, 185, 129, 0.72)';
-            ctx.lineWidth = 1.5;
-            ctx.beginPath();
-            ctx.roundRect(meterX - 34, meterTop - 18, 68, meterHeight + 70, 10);
-            ctx.fill();
-            ctx.stroke();
+            ctx.translate(width / 2, height * 0.48);
+            // In an aircraft-fixed cockpit view, the outside horizon moves opposite the
+            // aircraft bank: a right turn lowers the right wing, so the horizon tilts left.
+            ctx.rotate(-bank * Math.PI / 180);
+            ctx.translate(0, horizonOffset);
 
-            ctx.fillStyle = '#bbf7d0';
-            ctx.font = '700 10px JetBrains Mono, monospace';
-            ctx.textAlign = 'center';
-            ctx.fillText('ATT', meterX, meterTop - 3);
+            const skyGradient = ctx.createLinearGradient(0, -fillSize, 0, 0);
+            skyGradient.addColorStop(0, '#075985');
+            skyGradient.addColorStop(0.7, '#0f172a');
+            skyGradient.addColorStop(1, '#1e293b');
+            ctx.fillStyle = skyGradient;
+            ctx.fillRect(-fillSize, -fillSize, fillSize * 2, fillSize);
 
-            ctx.strokeStyle = 'rgba(226, 232, 240, 0.45)';
-            ctx.fillStyle = 'rgba(226, 232, 240, 0.82)';
-            ctx.font = '10px JetBrains Mono, monospace';
-            for (let marker = -15; marker <= 15; marker += 5) {
-                const y = meterTop + meterHeight / 2 - (marker / 15) * (meterHeight / 2);
-                const major = marker % 10 === 0;
-                ctx.beginPath();
-                ctx.moveTo(meterX - (major ? 18 : 12), y);
-                ctx.lineTo(meterX + (major ? 18 : 12), y);
-                ctx.stroke();
-                if (major) ctx.fillText(`${marker > 0 ? '+' : ''}${marker}`, meterX - 25, y + 3);
-            }
+            const groundGradient = ctx.createLinearGradient(0, 0, 0, fillSize);
+            groundGradient.addColorStop(0, '#0f766e');
+            groundGradient.addColorStop(0.35, '#064e3b');
+            groundGradient.addColorStop(1, '#020617');
+            ctx.fillStyle = groundGradient;
+            ctx.fillRect(-fillSize, 0, fillSize * 2, fillSize);
 
-            const pitchY = meterTop + meterHeight / 2 - (pitch / 15) * (meterHeight / 2);
-            ctx.strokeStyle = '#38bdf8';
-            ctx.lineWidth = 4;
-            ctx.beginPath();
-            ctx.moveTo(meterX - 22, pitchY);
-            ctx.lineTo(meterX + 22, pitchY);
-            ctx.stroke();
-
-            const bankX = meterX + (bank / 30) * 24;
-            ctx.fillStyle = '#facc15';
-            ctx.beginPath();
-            ctx.moveTo(bankX, meterTop + meterHeight + 20);
-            ctx.lineTo(bankX - 6, meterTop + meterHeight + 32);
-            ctx.lineTo(bankX + 6, meterTop + meterHeight + 32);
-            ctx.closePath();
-            ctx.fill();
-            ctx.strokeStyle = 'rgba(226, 232, 240, 0.45)';
+            ctx.strokeStyle = 'rgba(248, 250, 252, 0.55)';
             ctx.lineWidth = 2;
             ctx.beginPath();
-            ctx.moveTo(meterX - 24, meterTop + meterHeight + 32);
-            ctx.lineTo(meterX + 24, meterTop + meterHeight + 32);
+            ctx.moveTo(-fillSize, 0);
+            ctx.lineTo(fillSize, 0);
             ctx.stroke();
-
-            ctx.fillStyle = '#e2e8f0';
-            ctx.font = '10px JetBrains Mono, monospace';
-            ctx.fillText(`${pitch >= 0 ? '+' : ''}${Math.round(pitch)}° P`, meterX, meterTop + meterHeight + 48);
-            ctx.fillText(`${bank >= 0 ? 'R' : 'L'} ${Math.abs(Math.round(bank))}° B`, meterX, meterTop + meterHeight + 62);
             ctx.restore();
         }
 
