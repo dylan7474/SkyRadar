@@ -371,8 +371,29 @@
                 <!-- Target Data Injected Here -->
             </div>
 
+            <!-- Simulated cockpit view for selected target -->
+            <div id="cockpit-view" class="absolute bottom-4 left-4 bg-slate-950/90 backdrop-blur-md border border-radar-glow/40 rounded-xl shadow-2xl z-[520] hidden w-[340px] max-w-[calc(100%-2rem)] overflow-hidden pointer-events-auto">
+                <div class="flex items-center justify-between px-3 py-2 border-b border-radar-border bg-slate-900/90">
+                    <div>
+                        <h4 class="text-xs font-bold uppercase tracking-[0.18em] text-radar-glow">Simulated Cockpit View</h4>
+                        <p id="cockpit-subtitle" class="text-[10px] text-slate-400 mono">Select an aircraft to initialize</p>
+                    </div>
+                    <button onclick="hideHUD()" class="text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-full w-6 h-6 flex items-center justify-center transition-colors" aria-label="Close cockpit view">✕</button>
+                </div>
+                <div class="relative bg-gradient-to-b from-sky-950 via-slate-950 to-emerald-950">
+                    <canvas id="cockpit-canvas" width="680" height="360" class="block w-full h-[180px]" aria-label="Pilot-relative map showing nearby traffic"></canvas>
+                    <div class="absolute left-3 bottom-2 right-3 flex items-center justify-between text-[10px] mono text-slate-300 pointer-events-none">
+                        <span id="cockpit-heading" class="bg-slate-950/75 border border-slate-700 rounded px-1.5 py-0.5">HDG --°</span>
+                        <span id="cockpit-range" class="bg-slate-950/75 border border-slate-700 rounded px-1.5 py-0.5">RANGE 15 MI</span>
+                    </div>
+                </div>
+                <div id="cockpit-traffic-list" class="px-3 py-2 text-[10px] text-slate-400 mono border-t border-radar-border bg-slate-950/90">
+                    Nearby traffic will appear here.
+                </div>
+            </div>
+
             <!-- Calibration indicator inside map UI -->
-            <div class="absolute bottom-4 left-4 bg-radar-base/90 backdrop-blur border border-radar-border rounded-lg p-3 z-30 text-xs shadow-xl hidden sm:block max-w-[200px]">
+            <div class="absolute bottom-4 right-4 bg-radar-base/90 backdrop-blur border border-radar-border rounded-lg p-3 z-30 text-xs shadow-xl hidden sm:block max-w-[200px]">
                 <h4 class="font-bold text-white mb-1.5 flex items-center gap-1.5">
                     <span class="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></span>
                     Coverage Radar
@@ -555,6 +576,7 @@
         let refreshTimeoutId = null;
         let locationAcquired = false;
         let isSimulatingDemo = false;
+        const cockpitRangeMiles = 15;
         // Custom SVGs for crisp 2.5D Parallax Markers
         function get2_5DMarkerHTML(plane, colorTheme, stalkHeight) {
             const rotAngle = plane.track !== undefined && plane.track !== null ? Math.round(plane.track) : 0;
@@ -1447,12 +1469,130 @@
                 <div class="mt-2 text-[9px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded inline-block font-mono border border-slate-700">HEX: ${plane.hex ? plane.hex.toUpperCase() : ''}</div>
             `;
             hud.classList.remove('hidden');
+            updateCockpitView(plane);
         }
 
         function hideHUD() {
             activeSelectedHex = null;
             document.getElementById('hud-overlay').classList.add('hidden');
+            hideCockpitView();
             renderListPanel(aircraftList); // Clear side selection
+        }
+
+        function hideCockpitView() {
+            const cockpit = document.getElementById('cockpit-view');
+            if (cockpit) cockpit.classList.add('hidden');
+        }
+
+        function updateCockpitView(selectedPlane) {
+            const cockpit = document.getElementById('cockpit-view');
+            const canvas = document.getElementById('cockpit-canvas');
+            if (!cockpit || !canvas || selectedPlane.lat === undefined || selectedPlane.lon === undefined) return;
+
+            const heading = selectedPlane.track !== undefined && selectedPlane.track !== null ? Math.round(selectedPlane.track) : 0;
+            const callsign = selectedPlane.flight ? selectedPlane.flight.trim() : (selectedPlane.hex ? selectedPlane.hex.toUpperCase() : 'UNKNOWN');
+            document.getElementById('cockpit-subtitle').innerText = `${callsign} pilot-relative traffic picture`;
+            document.getElementById('cockpit-heading').innerText = `HDG ${String(heading).padStart(3, '0')}°`;
+            document.getElementById('cockpit-range').innerText = `RANGE ${cockpitRangeMiles} MI`;
+
+            const traffic = aircraftList
+                .filter(plane => plane.hex !== selectedPlane.hex && plane.lat !== undefined && plane.lon !== undefined)
+                .map(plane => {
+                    const distance = getHaversineDistance(selectedPlane.lat, selectedPlane.lon, plane.lat, plane.lon);
+                    const bearing = getBearingDegrees(selectedPlane.lat, selectedPlane.lon, plane.lat, plane.lon);
+                    return { plane, distance, bearing };
+                })
+                .filter(item => item.distance <= cockpitRangeMiles)
+                .sort((a, b) => a.distance - b.distance);
+
+            drawCockpitCanvas(canvas, selectedPlane, traffic, heading);
+            renderCockpitTrafficList(traffic);
+            cockpit.classList.remove('hidden');
+        }
+
+        function drawCockpitCanvas(canvas, selectedPlane, traffic, heading) {
+            const ctx = canvas.getContext('2d');
+            const width = canvas.width;
+            const height = canvas.height;
+            ctx.clearRect(0, 0, width, height);
+
+            const horizonY = Math.round(height * 0.45);
+            const skyGradient = ctx.createLinearGradient(0, 0, 0, horizonY);
+            skyGradient.addColorStop(0, '#082f49');
+            skyGradient.addColorStop(1, '#0f172a');
+            ctx.fillStyle = skyGradient;
+            ctx.fillRect(0, 0, width, horizonY);
+            const groundGradient = ctx.createLinearGradient(0, horizonY, 0, height);
+            groundGradient.addColorStop(0, '#064e3b');
+            groundGradient.addColorStop(1, '#020617');
+            ctx.fillStyle = groundGradient;
+            ctx.fillRect(0, horizonY, width, height);
+
+            ctx.strokeStyle = 'rgba(16, 185, 129, 0.25)';
+            ctx.lineWidth = 1;
+            for (let i = 1; i <= 3; i++) {
+                const y = horizonY + i * 48;
+                ctx.beginPath();
+                ctx.ellipse(width / 2, y, i * 88, 18, 0, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+            ctx.beginPath();
+            ctx.moveTo(width / 2, horizonY);
+            ctx.lineTo(width / 2, height - 22);
+            ctx.stroke();
+
+            ctx.fillStyle = '#10B981';
+            ctx.beginPath();
+            ctx.moveTo(width / 2, height - 56);
+            ctx.lineTo(width / 2 - 15, height - 22);
+            ctx.lineTo(width / 2 + 15, height - 22);
+            ctx.closePath();
+            ctx.fill();
+
+            traffic.forEach(({ plane, distance, bearing }) => {
+                const relativeBearing = normalizeAngle(bearing - heading);
+                if (Math.abs(relativeBearing) > 95) return;
+                const x = width / 2 + (relativeBearing / 95) * (width * 0.43);
+                const depth = Math.max(0, 1 - distance / cockpitRangeMiles);
+                const y = horizonY + 18 + (1 - depth) * (height - horizonY - 88);
+                const size = 7 + depth * 8;
+                const color = plane.isEmergency ? '#EF4444' : (plane.isMilitary ? '#38BDF8' : '#F59E0B');
+
+                ctx.save();
+                ctx.translate(x, y);
+                ctx.rotate(((plane.track || heading) - heading) * Math.PI / 180);
+                ctx.fillStyle = color;
+                ctx.beginPath();
+                ctx.moveTo(0, -size);
+                ctx.lineTo(size * 0.6, size);
+                ctx.lineTo(0, size * 0.45);
+                ctx.lineTo(-size * 0.6, size);
+                ctx.closePath();
+                ctx.fill();
+                ctx.restore();
+
+                ctx.fillStyle = color;
+                ctx.font = '20px JetBrains Mono, monospace';
+                ctx.fillText((plane.flight || plane.hex || 'UNK').trim().slice(0, 8), x + 10, y - 8);
+                ctx.fillStyle = '#cbd5e1';
+                ctx.font = '16px JetBrains Mono, monospace';
+                ctx.fillText(`${distance.toFixed(1)}mi`, x + 10, y + 12);
+            });
+        }
+
+        function renderCockpitTrafficList(traffic) {
+            const list = document.getElementById('cockpit-traffic-list');
+            if (!list) return;
+            const visibleTraffic = traffic.slice(0, 3);
+            if (visibleTraffic.length === 0) {
+                list.innerHTML = '<span class="text-emerald-400">No nearby traffic inside simulated forward range.</span>';
+                return;
+            }
+            list.innerHTML = visibleTraffic.map(({ plane, distance, bearing }) => {
+                const label = (plane.flight || plane.hex || 'UNKNOWN').trim();
+                const status = plane.isEmergency ? 'EMERG' : (plane.isMilitary ? 'MIL' : 'TRAFFIC');
+                return `<span class="inline-block mr-2 mb-1"><strong class="text-slate-200">${label}</strong> ${distance.toFixed(1)}mi ${Math.round(bearing)}° <em class="text-radar-glow not-italic">${status}</em></span>`;
+            }).join('');
         }
 
         // Visual Marker Mapping synchronize routine
@@ -1536,6 +1676,19 @@
             if (marker && panMap) {
                 map.setView(marker.getLatLng(), 11, { animate: true });
             }
+        }
+
+        function getBearingDegrees(lat1, lon1, lat2, lon2) {
+            const phi1 = lat1 * Math.PI / 180;
+            const phi2 = lat2 * Math.PI / 180;
+            const lambdaDelta = (lon2 - lon1) * Math.PI / 180;
+            const y = Math.sin(lambdaDelta) * Math.cos(phi2);
+            const x = Math.cos(phi1) * Math.sin(phi2) - Math.sin(phi1) * Math.cos(phi2) * Math.cos(lambdaDelta);
+            return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+        }
+
+        function normalizeAngle(degrees) {
+            return ((degrees + 540) % 360) - 180;
         }
 
         // Mathematical Haversine standard formula for perfect distance calculations (Statute Miles)
