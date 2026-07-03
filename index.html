@@ -393,7 +393,7 @@
                         <span id="instrument-source-note" class="text-[9px] text-slate-500 mono">ADS-B derived</span>
                     </div>
                     <canvas id="cockpit-instruments" width="780" height="520" class="block w-full h-[260px]" aria-label="Six pack flight instruments based on selected aircraft telemetry"></canvas>
-                    <p class="mt-2 text-[9px] leading-snug text-slate-500">ASI uses ADS-B ground speed as an airspeed proxy. Pitch, bank, and turn rate are estimated from reported climb/descent and heading data because ADS-B usually does not broadcast full attitude telemetry.</p>
+                    <p class="mt-2 text-[9px] leading-snug text-slate-500">ASI uses ADS-B ground speed as an airspeed proxy. Attitude is estimated from reported climb/descent and heading changes because ADS-B usually does not broadcast full attitude telemetry. The flight-path gauge is calculated from ground speed and vertical-rate data.</p>
                 </div>
                 <div id="cockpit-traffic-list" class="px-3 py-2 text-[10px] text-slate-400 mono border-t border-radar-border bg-slate-950/90">
                     Nearby traffic will appear here.
@@ -1621,6 +1621,26 @@
             return { pitch, bank, turnRate };
         }
 
+
+        function getEstimatedFlightPath(plane, speedKts, verticalSpeedFpm) {
+            const safeSpeed = Math.max(Number.parseFloat(speedKts) || 0, 0);
+            const verticalSpeed = Number.parseFloat(verticalSpeedFpm) || 0;
+            const nauticalMilesPerMinute = safeSpeed / 60;
+            const climbGradient = nauticalMilesPerMinute > 0.1 ? verticalSpeed / nauticalMilesPerMinute : 0;
+            const feetPerMinuteToKnots = 1 / 101.269;
+            const horizontalFeetPerMinute = safeSpeed * 6076.12 / 60;
+            const angle = horizontalFeetPerMinute > 1 ? Math.atan(verticalSpeed / horizontalFeetPerMinute) * 180 / Math.PI : 0;
+            const verticalSpeedKts = verticalSpeed * feetPerMinuteToKnots;
+            const totalEnergyKts = Math.sqrt((safeSpeed * safeSpeed) + (verticalSpeedKts * verticalSpeedKts));
+            const altitudeTrend = getPlaneAltitudeFeet(plane) + verticalSpeed;
+            return {
+                angle: Math.max(-12, Math.min(12, angle)),
+                climbGradient,
+                totalEnergyKts,
+                altitudeTrend
+            };
+        }
+
         function drawCockpitInstruments(plane) {
             const canvas = document.getElementById('cockpit-instruments');
             if (!canvas) return;
@@ -1632,11 +1652,12 @@
             const heading = Number.parseFloat(plane.track ?? plane.true_heading ?? plane.mag_heading ?? 0) || 0;
             const verticalSpeed = getPlaneVerticalSpeedFpm(plane);
             const attitude = getEstimatedAttitude(plane);
+            const flightPath = getEstimatedFlightPath(plane, speed, verticalSpeed);
             const gauges = [
                 { x: 130, y: 130, title: 'AIRSPEED', subtitle: 'KNOTS', type: 'asi', value: speed, min: 0, max: 500, major: 100 },
                 { x: 390, y: 130, title: 'ATTITUDE', subtitle: 'EST', type: 'attitude', value: attitude },
                 { x: 650, y: 130, title: 'ALTIMETER', subtitle: 'FEET', type: 'altimeter', value: altitude },
-                { x: 130, y: 390, title: 'TURN COORD', subtitle: 'EST', type: 'turn', value: attitude },
+                { x: 130, y: 390, title: 'FLIGHT PATH', subtitle: 'CALC', type: 'flightPath', value: flightPath },
                 { x: 390, y: 390, title: 'HEADING', subtitle: 'DEGREES', type: 'heading', value: heading },
                 { x: 650, y: 390, title: 'VSI', subtitle: 'FT/MIN', type: 'vsi', value: verticalSpeed, min: -3000, max: 3000, major: 1000 }
             ];
@@ -1665,7 +1686,7 @@
             ctx.clip();
 
             if (gauge.type === 'attitude') drawAttitudeFace(ctx, gauge.value, r);
-            else if (gauge.type === 'turn') drawTurnCoordinator(ctx, gauge.value, r);
+            else if (gauge.type === 'flightPath') drawFlightPathGauge(ctx, gauge.value, r);
             else if (gauge.type === 'heading') drawHeadingIndicator(ctx, gauge.value, r);
             else if (gauge.type === 'altimeter') drawAltimeter(ctx, gauge.value, r);
             else drawRoundScale(ctx, gauge, r);
@@ -1716,9 +1737,42 @@
             ctx.fillStyle = '#f8fafc'; ctx.font = '12px JetBrains Mono, monospace'; ctx.textAlign = 'center'; ctx.fillText(`${Math.round(attitude.pitch)}° pitch`, 0, -66); ctx.fillText(`${Math.round(attitude.bank)}° bank`, 0, 54);
         }
 
-        function drawTurnCoordinator(ctx, attitude, r) {
-            drawAttitudeFace(ctx, { pitch: 0, bank: attitude.bank }, r);
-            ctx.fillStyle = '#e2e8f0'; ctx.font = '12px JetBrains Mono, monospace'; ctx.textAlign = 'center'; ctx.fillText(`${attitude.turnRate.toFixed(1)}°/s`, 0, 34);
+        function drawFlightPathGauge(ctx, flightPath, r) {
+            ctx.strokeStyle = 'rgba(148,163,184,.35)';
+            ctx.lineWidth = 1;
+            for (let degrees = -10; degrees <= 10; degrees += 5) {
+                const y = -degrees * 6;
+                ctx.beginPath();
+                ctx.moveTo(-68, y);
+                ctx.lineTo(68, y);
+                ctx.stroke();
+                ctx.fillStyle = '#94a3b8';
+                ctx.font = '10px JetBrains Mono, monospace';
+                ctx.textAlign = 'right';
+                ctx.fillText(`${degrees > 0 ? '+' : ''}${degrees}°`, -72, y + 3);
+            }
+
+            const y = -flightPath.angle * 6;
+            ctx.strokeStyle = '#38bdf8';
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(-48, y);
+            ctx.lineTo(-14, y);
+            ctx.moveTo(14, y);
+            ctx.lineTo(48, y);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.arc(0, y, 8, 0, Math.PI * 2);
+            ctx.stroke();
+
+            ctx.fillStyle = '#f8fafc';
+            ctx.font = '700 16px JetBrains Mono, monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(`${flightPath.angle >= 0 ? '+' : ''}${flightPath.angle.toFixed(1)}°`, 0, 34);
+            ctx.fillStyle = '#cbd5e1';
+            ctx.font = '10px JetBrains Mono, monospace';
+            ctx.fillText(`${Math.round(flightPath.climbGradient).toLocaleString()} ft/nm`, 0, 50);
+            ctx.fillText(`E ${Math.round(flightPath.totalEnergyKts)} kt · 1m ${Math.round(flightPath.altitudeTrend).toLocaleString()} ft`, 0, 64);
         }
 
         function drawHeadingIndicator(ctx, heading, r) {
