@@ -139,29 +139,11 @@
             transform: scale(1.2);
         }
 
-        /* Isometric base-map treatment.
-           Only the Leaflet base tiles and vector overlays are tilted; HUD panels and
-           aircraft marker contents keep their existing screen-facing geometry. */
-        #map {
-            overflow: hidden;
-        }
-        #map .leaflet-tile-pane,
-        #map .leaflet-overlay-pane {
-            transform-origin: 50% 50% !important;
-            transform-style: preserve-3d;
-            will-change: transform;
-        }
+        /* Keep Leaflet's panes in their default projection so map tiles,
+           aircraft markers, range rings, and the user marker share the same
+           coordinate plane. */
         #map .leaflet-tile-pane {
             filter: saturate(0.85) contrast(1.08) brightness(0.78);
-        }
-        #map .leaflet-marker-pane,
-        #map .leaflet-shadow-pane,
-        #map .leaflet-tooltip-pane {
-            transform-style: preserve-3d;
-        }
-        #map .custom-plane-marker > div,
-        #map .user-pulse-marker > div {
-            transform-style: flat;
         }
 
         /* Radar sweep effect overlay */
@@ -573,12 +555,6 @@
         let refreshTimeoutId = null;
         let locationAcquired = false;
         let isSimulatingDemo = false;
-        const isometricMapTransform = {
-            scale: 1.65,
-            rotateX: 58,
-            rotateZ: -35
-        };
-
         // Custom SVGs for crisp 2.5D Parallax Markers
         function get2_5DMarkerHTML(plane, colorTheme, stalkHeight) {
             const rotAngle = plane.track !== undefined && plane.track !== null ? Math.round(plane.track) : 0;
@@ -658,52 +634,19 @@
                     maxZoom: 20
                 }).addTo(map);
 
-                applyIsometricMapView();
-                map.on('zoom move resize viewreset zoomend moveend', applyIsometricMapView);
                 window.addEventListener('resize', () => {
                     if (map) {
                         map.invalidateSize();
-                        applyIsometricMapView();
                     }
                 });
                 
-                logger.add("Leaflet interactive canvas established. Rendering Engine set to isometric 2.5D base map with upright target overlays.", "success");
+                logger.add("Leaflet interactive canvas established. Map projection synchronized with target overlays.", "success");
             } catch(e) {
                 logger.add("Map failed to load correctly: " + e.message, "error", e);
             }
 
             // Build markers & radius rings
             updateMapContext();
-        }
-
-        // Compose Leaflet's own pane transforms with a screen-filling isometric tilt.
-        function applyIsometricMapView() {
-            if (!map) return;
-
-            const mapEl = map.getContainer();
-            const panes = [map.getPane('tilePane'), map.getPane('overlayPane')];
-            const markerPane = map.getPane('markerPane');
-            const shadowPane = map.getPane('shadowPane');
-            const tooltipPane = map.getPane('tooltipPane');
-            const mapSize = map.getSize();
-            const overscanX = Math.max(mapSize.x * 0.22, 160);
-            const overscanY = Math.max(mapSize.y * 0.26, 160);
-            const isoTransform = `translate3d(${-overscanX}px, ${-overscanY}px, 0) scale(${isometricMapTransform.scale}) rotateX(${isometricMapTransform.rotateX}deg) rotateZ(${isometricMapTransform.rotateZ}deg)`;
-
-            mapEl.style.perspective = '1200px';
-            mapEl.style.perspectiveOrigin = '50% 50%';
-
-            panes.forEach((pane) => {
-                if (!pane) return;
-                pane.style.width = `${mapSize.x + overscanX * 2}px`;
-                pane.style.height = `${mapSize.y + overscanY * 2}px`;
-                pane.style.transform = isoTransform;
-            });
-
-            [markerPane, shadowPane, tooltipPane].forEach((pane) => {
-                if (!pane) return;
-                pane.style.transform = '';
-            });
         }
 
         // Create user visual target marker and distance perimeter circle
@@ -938,7 +881,6 @@
                 setTimeout(() => {
                     if (map) {
                         map.invalidateSize();
-                        applyIsometricMapView();
                     }
                 }, 300);
             });
@@ -959,7 +901,7 @@
                 const latInput = parseFloat(document.getElementById('manual-lat').value);
                 const lonInput = parseFloat(document.getElementById('manual-lon').value);
 
-                if (isNaN(latInput) || i/NaN(lonInput) || latInput < -90 || latInput > 90 || lonInput < -180 || lonInput > 180) {
+                if (isNaN(latInput) || isNaN(lonInput) || latInput < -90 || latInput > 90 || lonInput < -180 || lonInput > 180) {
                     showNotification('Input Error', 'Please specify legal coordinates (Latitude -90 to 90, Longitude -180 to 180)', 'danger');
                     logger.add("Rejected illegal custom tracking coordinate inputs.", "warning");
                     return;
