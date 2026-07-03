@@ -1591,7 +1591,7 @@
             ctx.fillStyle = groundGradient;
             ctx.fillRect(0, horizonY, width, height);
 
-            drawHudPitchLadder(ctx, width, height, horizonY, attitude);
+            drawHudAttitudeMeter(ctx, width, height, attitude);
             drawHudCompassTape(ctx, width, heading);
             drawHudTrafficScope(ctx, width, height);
 
@@ -1600,30 +1600,67 @@
             drawOwnshipSymbol(ctx, width, height);
         }
 
-        function drawHudPitchLadder(ctx, width, height, horizonY, attitude) {
+        function drawHudAttitudeMeter(ctx, width, height, attitude) {
+            const meterX = width - 78;
+            const meterTop = 84;
+            const meterHeight = 178;
+            const pitch = Math.max(-15, Math.min(15, attitude.pitch || 0));
+            const bank = Math.max(-30, Math.min(30, attitude.bank || 0));
+
             ctx.save();
-            ctx.translate(width / 2, horizonY);
-            ctx.rotate(-attitude.bank * Math.PI / 180);
-            ctx.strokeStyle = 'rgba(187, 247, 208, 0.65)';
-            ctx.fillStyle = 'rgba(187, 247, 208, 0.9)';
-            ctx.lineWidth = 2;
-            ctx.font = '13px JetBrains Mono, monospace';
+            ctx.fillStyle = 'rgba(2, 6, 23, 0.58)';
+            ctx.strokeStyle = 'rgba(16, 185, 129, 0.72)';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.roundRect(meterX - 34, meterTop - 18, 68, meterHeight + 70, 10);
+            ctx.fill();
+            ctx.stroke();
+
+            ctx.fillStyle = '#bbf7d0';
+            ctx.font = '700 10px JetBrains Mono, monospace';
             ctx.textAlign = 'center';
-            for (let pitch = -20; pitch <= 20; pitch += 5) {
-                const y = -pitch * 6 - attitude.pitch * 2.8;
-                if (Math.abs(y) > height * 0.42) continue;
-                const span = pitch === 0 ? 150 : 86;
+            ctx.fillText('ATT', meterX, meterTop - 3);
+
+            ctx.strokeStyle = 'rgba(226, 232, 240, 0.45)';
+            ctx.fillStyle = 'rgba(226, 232, 240, 0.82)';
+            ctx.font = '10px JetBrains Mono, monospace';
+            for (let marker = -15; marker <= 15; marker += 5) {
+                const y = meterTop + meterHeight / 2 - (marker / 15) * (meterHeight / 2);
+                const major = marker % 10 === 0;
                 ctx.beginPath();
-                ctx.moveTo(-span, y);
-                ctx.lineTo(-24, y);
-                ctx.moveTo(24, y);
-                ctx.lineTo(span, y);
+                ctx.moveTo(meterX - (major ? 18 : 12), y);
+                ctx.lineTo(meterX + (major ? 18 : 12), y);
                 ctx.stroke();
-                if (pitch !== 0) {
-                    ctx.fillText(String(Math.abs(pitch)), -span - 18, y + 4);
-                    ctx.fillText(String(Math.abs(pitch)), span + 18, y + 4);
-                }
+                if (major) ctx.fillText(`${marker > 0 ? '+' : ''}${marker}`, meterX - 25, y + 3);
             }
+
+            const pitchY = meterTop + meterHeight / 2 - (pitch / 15) * (meterHeight / 2);
+            ctx.strokeStyle = '#38bdf8';
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(meterX - 22, pitchY);
+            ctx.lineTo(meterX + 22, pitchY);
+            ctx.stroke();
+
+            const bankX = meterX + (bank / 30) * 24;
+            ctx.fillStyle = '#facc15';
+            ctx.beginPath();
+            ctx.moveTo(bankX, meterTop + meterHeight + 20);
+            ctx.lineTo(bankX - 6, meterTop + meterHeight + 32);
+            ctx.lineTo(bankX + 6, meterTop + meterHeight + 32);
+            ctx.closePath();
+            ctx.fill();
+            ctx.strokeStyle = 'rgba(226, 232, 240, 0.45)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(meterX - 24, meterTop + meterHeight + 32);
+            ctx.lineTo(meterX + 24, meterTop + meterHeight + 32);
+            ctx.stroke();
+
+            ctx.fillStyle = '#e2e8f0';
+            ctx.font = '10px JetBrains Mono, monospace';
+            ctx.fillText(`${pitch >= 0 ? '+' : ''}${Math.round(pitch)}° P`, meterX, meterTop + meterHeight + 48);
+            ctx.fillText(`${bank >= 0 ? 'R' : 'L'} ${Math.abs(Math.round(bank))}° B`, meterX, meterTop + meterHeight + 62);
             ctx.restore();
         }
 
@@ -1779,7 +1816,7 @@
                 { x: 130, y: 130, title: 'AIRSPEED', subtitle: 'KNOTS', type: 'asi', value: speed, min: 0, max: 500, major: 100 },
                 { x: 390, y: 130, title: 'ATTITUDE', subtitle: 'EST', type: 'attitude', value: attitude },
                 { x: 650, y: 130, title: 'ALTIMETER', subtitle: 'FEET', type: 'altimeter', value: altitude },
-                { x: 130, y: 390, title: 'TURN COORD', subtitle: '2 MIN', type: 'turnCoordinator', value: attitude },
+                { x: 130, y: 390, title: 'BANK/TURN', subtitle: 'DEG/SEC', type: 'turnCoordinator', value: attitude },
                 { x: 390, y: 390, title: 'HEADING', subtitle: 'DEGREES', type: 'heading', value: heading },
                 { x: 650, y: 390, title: 'VSI', subtitle: 'FT/MIN', type: 'vsi', value: verticalSpeed, min: -3000, max: 3000, major: 1000 }
             ];
@@ -1839,7 +1876,7 @@
             }
             const angle = start + ((value - gauge.min) / (gauge.max - gauge.min)) * sweep;
             drawNeedle(ctx, angle, r - 42, gauge.type === 'vsi' ? '#F59E0B' : '#EF4444');
-            ctx.fillStyle = '#f8fafc'; ctx.font = '700 18px JetBrains Mono, monospace'; ctx.textAlign = 'center'; ctx.fillText(Math.round(gauge.value).toLocaleString(), 0, 34);
+            if (gauge.showValue !== false) { ctx.fillStyle = '#f8fafc'; ctx.font = '700 18px JetBrains Mono, monospace'; ctx.textAlign = 'center'; ctx.fillText(Math.round(gauge.value).toLocaleString(), 0, 34); }
         }
 
         function drawNeedle(ctx, angle, length, color) {
@@ -1862,52 +1899,52 @@
         function drawTurnCoordinator(ctx, attitude, r) {
             const bank = Math.max(-45, Math.min(45, attitude.bank || 0));
             const turnRate = Math.max(-4, Math.min(4, attitude.turnRate || 0));
+            const bankNeedle = (bank - 90) * Math.PI / 180;
+            const turnNeedle = (turnRate / 4) * 70;
+
             ctx.strokeStyle = 'rgba(226,232,240,.75)';
             ctx.lineWidth = 2;
             ctx.beginPath();
-            ctx.arc(0, 4, 68, Math.PI * 1.1, Math.PI * 1.9);
+            ctx.arc(0, 0, 72, Math.PI * 1.15, Math.PI * 1.85);
             ctx.stroke();
             [-30, -15, 0, 15, 30].forEach(deg => {
                 const a = (deg - 90) * Math.PI / 180;
-                const inner = deg === 0 ? 42 : 52;
+                const inner = deg === 0 ? 42 : 54;
                 ctx.beginPath();
-                ctx.moveTo(Math.cos(a) * inner, Math.sin(a) * inner + 4);
-                ctx.lineTo(Math.cos(a) * 68, Math.sin(a) * 68 + 4);
+                ctx.moveTo(Math.cos(a) * inner, Math.sin(a) * inner);
+                ctx.lineTo(Math.cos(a) * 72, Math.sin(a) * 72);
                 ctx.stroke();
             });
 
-            ctx.save();
-            ctx.rotate(bank * Math.PI / 180);
-            ctx.fillStyle = '#38bdf8';
-            ctx.strokeStyle = '#e0f2fe';
+            ctx.strokeStyle = '#38bdf8';
+            ctx.lineWidth = 5;
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.lineTo(Math.cos(bankNeedle) * 64, Math.sin(bankNeedle) * 64);
+            ctx.stroke();
+            ctx.fillStyle = '#e5e7eb';
+            ctx.beginPath();
+            ctx.arc(0, 0, 7, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.strokeStyle = 'rgba(148, 163, 184, .8)';
             ctx.lineWidth = 2;
             ctx.beginPath();
-            ctx.moveTo(0, -22);
-            ctx.lineTo(58, 2);
-            ctx.lineTo(16, 10);
-            ctx.lineTo(8, 28);
-            ctx.lineTo(-8, 28);
-            ctx.lineTo(-16, 10);
-            ctx.lineTo(-58, 2);
-            ctx.closePath();
-            ctx.fill();
+            ctx.moveTo(-58, 44);
+            ctx.lineTo(58, 44);
             ctx.stroke();
-            ctx.restore();
+            ctx.fillStyle = '#facc15';
+            ctx.beginPath();
+            ctx.roundRect(turnNeedle - 6, 36, 12, 16, 4);
+            ctx.fill();
 
-            const ballX = Math.max(-34, Math.min(34, bank * 0.75 + turnRate * 5));
-            ctx.strokeStyle = '#94a3b8';
-            ctx.beginPath();
-            ctx.moveTo(-48, 54);
-            ctx.lineTo(48, 54);
-            ctx.stroke();
             ctx.fillStyle = '#f8fafc';
-            ctx.beginPath();
-            ctx.arc(ballX, 54, 9, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.fillStyle = '#f8fafc';
-            ctx.font = '700 16px JetBrains Mono, monospace';
+            ctx.font = '700 15px JetBrains Mono, monospace';
             ctx.textAlign = 'center';
-            ctx.fillText(`${bank >= 0 ? 'R' : 'L'} ${Math.abs(Math.round(bank))}°`, 0, 34);
+            ctx.fillText(`${bank >= 0 ? 'R' : 'L'} ${Math.abs(Math.round(bank))}°`, 0, 20);
+            ctx.fillStyle = '#cbd5e1';
+            ctx.font = '10px JetBrains Mono, monospace';
+            ctx.fillText(`${turnRate >= 0 ? 'R' : 'L'} ${Math.abs(turnRate).toFixed(1)}°/s`, 0, 64);
         }
 
         function drawFlightPathGauge(ctx, flightPath, r) {
@@ -1955,7 +1992,7 @@
         }
 
         function drawAltimeter(ctx, altitude, r) {
-            drawRoundScale(ctx, { value: altitude % 1000, min: 0, max: 1000, major: 100, type: 'alt' }, r);
+            drawRoundScale(ctx, { value: altitude % 1000, min: 0, max: 1000, major: 100, type: 'alt', showValue: false }, r);
             drawNeedle(ctx, 135 * Math.PI / 180 + ((altitude % 10000) / 10000) * 270 * Math.PI / 180, r - 58, '#38bdf8');
             ctx.fillStyle = '#f8fafc'; ctx.font = '700 17px JetBrains Mono, monospace'; ctx.textAlign = 'center'; ctx.fillText(Math.round(altitude).toLocaleString(), 0, 34);
         }
