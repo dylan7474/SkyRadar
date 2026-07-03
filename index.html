@@ -162,6 +162,27 @@
             transform-origin: center center;
             animation: radar-sweep 4s linear infinite;
         }
+
+        #cockpit-view {
+            transition: width 0.2s ease, max-width 0.2s ease, transform 0.2s ease;
+        }
+        #cockpit-view.cockpit-expanded {
+            width: min(920px, calc(100% - 2rem));
+        }
+        #cockpit-view.cockpit-expanded #cockpit-canvas {
+            height: 300px;
+        }
+        #cockpit-view.cockpit-expanded #cockpit-instruments {
+            height: 470px;
+        }
+        @media (max-width: 640px) {
+            #cockpit-view.cockpit-expanded {
+                inset: 1rem;
+                width: auto;
+                max-width: none;
+                overflow-y: auto;
+            }
+        }
     </style>
 </head>
 <body class="text-slate-100 min-h-screen flex flex-col antialiased">
@@ -378,7 +399,10 @@
                         <h4 class="text-xs font-bold uppercase tracking-[0.18em] text-radar-glow">Simulated Cockpit View</h4>
                         <p id="cockpit-subtitle" class="text-[10px] text-slate-400 mono">Select an aircraft to initialize</p>
                     </div>
-                    <button onclick="hideHUD()" class="text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-full w-6 h-6 flex items-center justify-center transition-colors" aria-label="Close cockpit view">✕</button>
+                    <div class="flex items-center gap-2">
+                        <button id="btn-cockpit-zoom" class="text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-md px-2 h-6 text-[10px] mono transition-colors" aria-label="Toggle larger cockpit instruments" title="Toggle larger cockpit instruments">ZOOM</button>
+                        <button onclick="hideHUD()" class="text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-full w-6 h-6 flex items-center justify-center transition-colors" aria-label="Close cockpit view">✕</button>
+                    </div>
                 </div>
                 <div class="relative bg-gradient-to-b from-sky-950 via-slate-950 to-emerald-950">
                     <canvas id="cockpit-canvas" width="680" height="400" class="block w-full h-[200px]" aria-label="Pilot-relative HUD showing nearby traffic with altitude separation and range cues"></canvas>
@@ -394,10 +418,7 @@
                         <span id="instrument-source-note" class="text-[9px] text-slate-500 mono">ADS-B simulated</span>
                     </div>
                     <canvas id="cockpit-instruments" width="780" height="520" class="block w-full h-[260px]" aria-label="Six pack flight instruments based on selected aircraft telemetry"></canvas>
-                    <p class="mt-2 text-[9px] leading-snug text-slate-500">HUD traffic includes relative bearing, distance, and altitude separation when reported. Airspeed, attitude, and flight-path cues are estimated from ADS-B ground speed, heading, altitude, and vertical-rate data, so use this as a situational display only.</p>
-                </div>
-                <div id="cockpit-traffic-list" class="px-3 py-2 text-[10px] text-slate-400 mono border-t border-radar-border bg-slate-950/90">
-                    Nearest traffic will appear here with relative bearing, altitude separation, and closure cues.
+                    <p class="mt-2 text-[9px] leading-snug text-slate-500">Six-pack values are derived from ADS-B telemetry; bank and pitch are estimated from track and vertical-rate changes.</p>
                 </div>
             </div>
 
@@ -880,6 +901,19 @@
             
             document.getElementById('btn-zoom-out').addEventListener('click', () => {
                 if (map) map.zoomOut();
+            });
+
+            document.getElementById('btn-cockpit-zoom').addEventListener('click', () => {
+                const cockpit = document.getElementById('cockpit-view');
+                const zoomButton = document.getElementById('btn-cockpit-zoom');
+                if (!cockpit || !zoomButton) return;
+                const expanded = cockpit.classList.toggle('cockpit-expanded');
+                zoomButton.innerText = expanded ? 'COMPACT' : 'ZOOM';
+                zoomButton.setAttribute('aria-pressed', String(expanded));
+                if (activeSelectedHex) {
+                    const activePlane = aircraftList.find(plane => plane.hex === activeSelectedHex);
+                    if (activePlane) updateCockpitView(activePlane);
+                }
             });
 
             // Sidebar Toggle Logic
@@ -1523,7 +1557,6 @@
 
             drawCockpitCanvas(canvas, selectedPlane, traffic, heading);
             drawCockpitInstruments(selectedPlane);
-            renderCockpitTrafficList(traffic);
             cockpit.classList.remove('hidden');
         }
 
@@ -1742,12 +1775,11 @@
             const heading = Number.parseFloat(plane.track ?? plane.true_heading ?? plane.mag_heading ?? 0) || 0;
             const verticalSpeed = getPlaneVerticalSpeedFpm(plane);
             const attitude = getEstimatedAttitude(plane);
-            const flightPath = getEstimatedFlightPath(plane, speed, verticalSpeed);
             const gauges = [
                 { x: 130, y: 130, title: 'AIRSPEED', subtitle: 'KNOTS', type: 'asi', value: speed, min: 0, max: 500, major: 100 },
                 { x: 390, y: 130, title: 'ATTITUDE', subtitle: 'EST', type: 'attitude', value: attitude },
                 { x: 650, y: 130, title: 'ALTIMETER', subtitle: 'FEET', type: 'altimeter', value: altitude },
-                { x: 130, y: 390, title: 'FLIGHT PATH', subtitle: 'CALC', type: 'flightPath', value: flightPath },
+                { x: 130, y: 390, title: 'TURN COORD', subtitle: '2 MIN', type: 'turnCoordinator', value: attitude },
                 { x: 390, y: 390, title: 'HEADING', subtitle: 'DEGREES', type: 'heading', value: heading },
                 { x: 650, y: 390, title: 'VSI', subtitle: 'FT/MIN', type: 'vsi', value: verticalSpeed, min: -3000, max: 3000, major: 1000 }
             ];
@@ -1776,7 +1808,7 @@
             ctx.clip();
 
             if (gauge.type === 'attitude') drawAttitudeFace(ctx, gauge.value, r);
-            else if (gauge.type === 'flightPath') drawFlightPathGauge(ctx, gauge.value, r);
+            else if (gauge.type === 'turnCoordinator') drawTurnCoordinator(ctx, gauge.value, r);
             else if (gauge.type === 'heading') drawHeadingIndicator(ctx, gauge.value, r);
             else if (gauge.type === 'altimeter') drawAltimeter(ctx, gauge.value, r);
             else drawRoundScale(ctx, gauge, r);
@@ -1825,6 +1857,57 @@
             ctx.restore();
             ctx.strokeStyle = '#facc15'; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(-48, 0); ctx.lineTo(-14, 0); ctx.moveTo(14, 0); ctx.lineTo(48, 0); ctx.moveTo(0, 8); ctx.lineTo(0, -10); ctx.stroke();
             ctx.fillStyle = '#f8fafc'; ctx.font = '12px JetBrains Mono, monospace'; ctx.textAlign = 'center'; ctx.fillText(`${Math.round(attitude.pitch)}° pitch`, 0, -66); ctx.fillText(`${Math.round(attitude.bank)}° bank`, 0, 54);
+        }
+
+        function drawTurnCoordinator(ctx, attitude, r) {
+            const bank = Math.max(-45, Math.min(45, attitude.bank || 0));
+            const turnRate = Math.max(-4, Math.min(4, attitude.turnRate || 0));
+            ctx.strokeStyle = 'rgba(226,232,240,.75)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(0, 4, 68, Math.PI * 1.1, Math.PI * 1.9);
+            ctx.stroke();
+            [-30, -15, 0, 15, 30].forEach(deg => {
+                const a = (deg - 90) * Math.PI / 180;
+                const inner = deg === 0 ? 42 : 52;
+                ctx.beginPath();
+                ctx.moveTo(Math.cos(a) * inner, Math.sin(a) * inner + 4);
+                ctx.lineTo(Math.cos(a) * 68, Math.sin(a) * 68 + 4);
+                ctx.stroke();
+            });
+
+            ctx.save();
+            ctx.rotate(bank * Math.PI / 180);
+            ctx.fillStyle = '#38bdf8';
+            ctx.strokeStyle = '#e0f2fe';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(0, -22);
+            ctx.lineTo(58, 2);
+            ctx.lineTo(16, 10);
+            ctx.lineTo(8, 28);
+            ctx.lineTo(-8, 28);
+            ctx.lineTo(-16, 10);
+            ctx.lineTo(-58, 2);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+            ctx.restore();
+
+            const ballX = Math.max(-34, Math.min(34, bank * 0.75 + turnRate * 5));
+            ctx.strokeStyle = '#94a3b8';
+            ctx.beginPath();
+            ctx.moveTo(-48, 54);
+            ctx.lineTo(48, 54);
+            ctx.stroke();
+            ctx.fillStyle = '#f8fafc';
+            ctx.beginPath();
+            ctx.arc(ballX, 54, 9, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#f8fafc';
+            ctx.font = '700 16px JetBrains Mono, monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(`${bank >= 0 ? 'R' : 'L'} ${Math.abs(Math.round(bank))}°`, 0, 34);
         }
 
         function drawFlightPathGauge(ctx, flightPath, r) {
