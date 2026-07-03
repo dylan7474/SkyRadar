@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SkyRadar - Local ADS-B Flight Tracker</title>
+    <title>SkyRadar - Tactical ADS-B Flight Tracker</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -70,44 +70,14 @@
         ::-webkit-scrollbar-thumb:hover {
             background: #10B981;
         }
+        
         /* Leaflet custom overrides for dark mode */
         .leaflet-container {
             background-color: #070a12 !important;
             font-family: inherit;
         }
-        .leaflet-popup-content-wrapper, .leaflet-popup-tip {
-            background: #1E293B !important;
-            color: #F8FAFC !important;
-            border: 1px solid #334155;
-            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
-            border-radius: 0.5rem;
-        }
-        .leaflet-popup-close-button {
-            color: #94A3B8 !important;
-        }
-        /* Radar sweep effect overlay */
-        .radar-sweep-container {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            pointer-events: none;
-            overflow: hidden;
-            z-index: 400;
-            opacity: 0.04;
-        }
-        .radar-line {
-            width: 200%;
-            height: 200%;
-            background: conic-gradient(from 0deg, #10B981 0deg, transparent 90deg, transparent 360deg);
-            position: absolute;
-            top: -50%;
-            left: -50%;
-            transform-origin: center center;
-            animation: radar-sweep 4s linear infinite;
-        }
-        /* Pulse Animation for active rings */
+
+        /* Pulse Animation for active ground radar rings */
         .user-pulse-marker {
             display: flex;
             align-items: center;
@@ -133,6 +103,52 @@
             0% { transform: scale(0.5); opacity: 0.8; }
             100% { transform: scale(2.2); opacity: 0; }
         }
+        
+        /* Disable native leaflet popups entirely since we use the custom HUD overlay now */
+        .leaflet-popup {
+            display: none !important;
+        }
+        
+        /* Dark theme for map scale */
+        .leaflet-control-scale-line {
+            background: rgba(15, 23, 42, 0.75) !important;
+            color: #94A3B8 !important;
+            border-color: #475569 !important;
+            backdrop-filter: blur(4px);
+        }
+
+        /* 2.5D Marker Label Hover Effect */
+        .aircraft-label {
+            transition: all 0.2s ease;
+        }
+        .aircraft-label:hover {
+            background: rgba(30, 41, 59, 0.95) !important;
+            transform: scale(1.05);
+            z-index: 9999 !important;
+        }
+        .plane-svg-wrapper {
+            transition: transform 0.2s ease;
+        }
+        .plane-svg-wrapper:hover {
+            transform: scale(1.2);
+        }
+
+        /* Radar sweep effect overlay */
+        .radar-sweep-container {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none;
+            overflow: hidden;
+            z-index: 400;
+            opacity: 0.04;
+        }
+        .radar-line {
+            width: 200%; height: 200%;
+            background: conic-gradient(from 0deg, #10B981 0deg, transparent 90deg, transparent 360deg);
+            position: absolute; top: -50%; left: -50%;
+            transform-origin: center center;
+            animation: radar-sweep 4s linear infinite;
+        }
     </style>
 </head>
 <body class="text-slate-100 min-h-screen flex flex-col antialiased">
@@ -149,7 +165,7 @@
                 <h1 class="text-lg font-bold tracking-tight text-white flex items-center gap-2">
                     SkyRadar <span class="text-xs bg-radar-glow/20 text-radar-glow px-2 py-0.5 rounded border border-radar-glow/30">ADS-B LIVE</span>
                 </h1>
-                <p class="text-xs text-slate-400">Local Air Traffic Surveillance</p>
+                <p class="text-xs text-slate-400">Tactical Air Traffic Surveillance</p>
             </div>
         </div>
 
@@ -173,6 +189,12 @@
                 </select>
             </div>
 
+            <!-- Custom Map Zoom Controls -->
+            <div class="flex items-center bg-slate-800/80 border border-slate-700 rounded-lg overflow-hidden">
+                <button id="btn-zoom-out" class="px-3.5 py-1 text-slate-300 hover:text-white hover:bg-slate-700 border-r border-slate-700 font-bold text-lg transition-colors focus:outline-none" title="Zoom Out">−</button>
+                <button id="btn-zoom-in" class="px-3.5 py-1 text-slate-300 hover:text-white hover:bg-slate-700 font-bold text-lg transition-colors focus:outline-none" title="Zoom In">+</button>
+            </div>
+
             <!-- Manual Coordinate Override Button -->
             <button id="btn-manual-loc" class="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
@@ -194,7 +216,7 @@
     <main class="flex-grow grid grid-cols-1 lg:grid-cols-12 gap-0 overflow-hidden relative">
         
         <!-- Sidebar / Aircraft List (Grid 4) -->
-        <section class="lg:col-span-5 xl:col-span-4 bg-radar-base border-r border-radar-border flex flex-col h-[45vh] lg:h-auto overflow-hidden order-2 lg:order-1">
+        <section class="lg:col-span-5 xl:col-span-4 bg-radar-base border-r border-radar-border flex flex-col h-[45vh] lg:h-auto overflow-hidden order-2 lg:order-1 z-50">
             
             <!-- Tab Selection Bar -->
             <div class="flex border-b border-radar-border bg-slate-900/60">
@@ -316,13 +338,18 @@
         </section>
 
         <!-- Main Map Area (Grid 8) -->
-        <section class="lg:col-span-7 xl:col-span-8 h-[55vh] lg:h-auto relative flex flex-col order-1 lg:order-2">
+        <section id="map-container" class="lg:col-span-7 xl:col-span-8 h-[55vh] lg:h-auto relative flex flex-col order-1 lg:order-2 overflow-hidden bg-radar-dark">
             <!-- Leaflet Map Container -->
             <div id="map" class="w-full flex-grow z-10"></div>
             
             <!-- Map Decorative Radar Overlay -->
-            <div class="radar-sweep-container">
+            <div class="radar-sweep-container z-20">
                 <div class="radar-line"></div>
+            </div>
+
+            <!-- Custom Clean HUD Overlay for Selected Target -->
+            <div id="hud-overlay" class="absolute top-4 right-4 bg-slate-900/90 backdrop-blur-md border border-radar-border rounded-xl shadow-2xl p-4 z-[500] text-slate-100 hidden min-w-[260px] pointer-events-auto transition-all">
+                <!-- Target Data Injected Here -->
             </div>
 
             <!-- Calibration indicator inside map UI -->
@@ -510,15 +537,54 @@
         let locationAcquired = false;
         let isSimulatingDemo = false;
 
-        // Custom SVGs for Airplane category display & rotation mapping
-        function getPlaneIconSVG(trackAngle, color = '#10B981', isMilitary = false) {
-            const rotAngle = trackAngle !== undefined && trackAngle !== null ? trackAngle : 0;
-            const outlineColor = isMilitary ? '#38BDF8' : color;
-            return `
-                <div style="transform: rotate(${rotAngle}deg); width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; transition: transform 0.8s ease-in-out;">
-                    <svg viewBox="0 0 512 512" style="width: 30px; height: 30px; fill: ${outlineColor}; filter: drop-shadow(0px 0px 4px rgba(0, 0, 0, 0.7));">
+        // Custom SVGs for crisp 2.5D Parallax Markers
+        function get2_5DMarkerHTML(plane, colorTheme, stalkHeight) {
+            const rotAngle = plane.track !== undefined && plane.track !== null ? Math.round(plane.track) : 0;
+            const isMilitary = plane.isMilitary;
+            const outlineColor = isMilitary ? '#38BDF8' : colorTheme;
+            
+            // Format labels
+            const callsign = plane.flight ? plane.flight.trim() : (plane.hex ? plane.hex.toUpperCase() : 'UNKNOWN');
+            const altStr = plane.alt_baro === 'ground' ? 'GND' : `${(plane.alt_baro || 0).toLocaleString()} FT`;
+            const spdStr = plane.gs ? `${Math.round(plane.gs)} KTS` : '0 KTS';
+
+            let groundHtml = '';
+            let stalkHtml = '';
+
+            if (stalkHeight > 0) {
+                // Ground intersection shadow
+                groundHtml = `<div style="position: absolute; left: 96px; bottom: -4px; width: 8px; height: 8px; border: 1.5px solid ${outlineColor}; transform: rotate(45deg); opacity: 0.8; box-shadow: 0 0 8px ${outlineColor}; z-index: 1;"></div>`;
+                // Vertical tether line
+                stalkHtml = `<div style="position: absolute; left: 99px; bottom: 0px; width: 2px; height: ${stalkHeight}px; background: linear-gradient(to top, transparent 0%, ${outlineColor} 100%); opacity: 0.7; z-index: 2;"></div>`;
+            } else {
+                // Grounded aircraft
+                groundHtml = `<div style="position: absolute; left: 96px; bottom: -4px; width: 8px; height: 8px; background-color: ${outlineColor}; border-radius: 50%; opacity: 0.5; box-shadow: 0 0 5px ${outlineColor}; z-index: 1;"></div>`;
+            }
+
+            // Aircraft Icon
+            const planeHtml = `
+                <div class="plane-svg-wrapper" style="position: absolute; left: 84px; bottom: ${stalkHeight - 16}px; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; z-index: 5; pointer-events: auto; cursor: pointer;">
+                    <svg viewBox="0 0 512 512" style="width: 24px; height: 24px; fill: ${outlineColor}; filter: drop-shadow(0px 4px 6px rgba(0,0,0,0.8)); transform: rotate(${rotAngle}deg); transform-origin: center;">
                         <path d="M448 336v-40L288 192V79.2c0-26.1-20.9-47.2-47-47.2s-47 21.1-47 47.2V192L32 296v40l160-48v117.8l-42.6 32v24.2l82.6-22.1 82.6 22.1v-24.2L272 445.8V328l160 8z" />
                     </svg>
+                </div>
+            `;
+
+            // Glassmorphism Data Tag
+            const labelHtml = `
+                <div class="aircraft-label" style="position: absolute; left: 118px; bottom: ${stalkHeight - 12}px; background: rgba(15, 23, 42, 0.75); backdrop-filter: blur(4px); border-left: 2px solid ${outlineColor}; padding: 3px 6px; border-radius: 0 6px 6px 0; color: #f8fafc; font-family: 'JetBrains Mono', monospace; line-height: 1.2; box-shadow: 0 4px 6px rgba(0,0,0,0.3); pointer-events: auto; cursor: pointer; white-space: nowrap; z-index: 4;">
+                    <div style="font-weight: 700; font-size: 11px; letter-spacing: 0.5px;">${callsign}</div>
+                    <div style="color: #94a3b8; font-size: 9px; margin-top: 1px;">${altStr} <span style="opacity:0.5">|</span> ${spdStr}</div>
+                </div>
+            `;
+
+            // Wrapper container fixed at 200px width. Anchor is exactly center [100, 220]
+            return `
+                <div style="position: relative; width: 200px; height: 220px; pointer-events: none;">
+                    ${stalkHtml}
+                    ${groundHtml}
+                    ${planeHtml}
+                    ${labelHtml}
                 </div>
             `;
         }
@@ -536,19 +602,21 @@
             try {
                 // Instantiate the map centered initially on userLocation default
                 map = L.map('map', {
-                    zoomControl: true,
+                    zoomControl: false, // Disabled native controls to use custom header buttons
                     attributionControl: false
                 }).setView([userLocation.lat, userLocation.lon], 9);
 
-                // Leaflet dark theme tile layer - CartoDB Dark Matter (does not require custom API key)
+                // Click away on map hides the custom HUD panel
+                map.on('click', () => {
+                    hideHUD();
+                });
+
+                // Leaflet dark theme tile layer - CartoDB Dark Matter
                 L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
                     maxZoom: 20
                 }).addTo(map);
-
-                // Add custom scale
-                L.control.scale({ position: 'bottomright' }).addTo(map);
                 
-                logger.add("Leaflet interactive coordinates canvas established successfully.", "success");
+                logger.add("Leaflet interactive 2D canvas established. Rendering Engine set to 2.5D Parallax overlay.", "success");
             } catch(e) {
                 logger.add("Map failed to load correctly: " + e.message, "error", e);
             }
@@ -561,7 +629,7 @@
         function updateMapContext() {
             const coordArray = [userLocation.lat, userLocation.lon];
             
-            // Set/update pulsing blue marker
+            // Set/update pulsing blue marker (ground anchor)
             if (!userMarker) {
                 const pulsingIcon = L.divIcon({
                     className: 'user-pulse-marker',
@@ -573,7 +641,7 @@
                 userMarker.setLatLng(coordArray);
             }
 
-            // Set/update 50 miles perimeter border circle (50 miles = 80,467 meters)
+            // Set/update perimeter border circle
             const radiusMeters = activeRadius * 1609.34;
             if (!radarCircle) {
                 radarCircle = L.circle(coordArray, {
@@ -749,6 +817,15 @@
                 showNotification('Radar recalibration', `Radius range expanded to ${activeRadius} miles.`, 'info');
             });
 
+            // Custom Zoom Controls
+            document.getElementById('btn-zoom-in').addEventListener('click', () => {
+                if (map) map.zoomIn();
+            });
+            
+            document.getElementById('btn-zoom-out').addEventListener('click', () => {
+                if (map) map.zoomOut();
+            });
+
             // Manual Location Dialog triggers
             const modal = document.getElementById('modal-coords');
             document.getElementById('btn-manual-loc').addEventListener('click', () => {
@@ -775,6 +852,7 @@
                 userLocation.lon = lonInput;
                 locationAcquired = true;
                 isSimulatingDemo = false; // Turn off demo context if center relocates
+                hideHUD();
                 
                 updateGeoStatusIndicator('success', 'Custom Center Set');
                 updateMapContext();
@@ -1047,6 +1125,7 @@
             
             // Clear prior listings
             aircraftList = [];
+            hideHUD();
             
             const numTargets = 8;
             logger.add(`Creating ${numTargets} synthetic aircraft vectors spaced circularly around Lat: ${userLocation.lat.toFixed(4)}, Lon: ${userLocation.lon.toFixed(4)}...`, "info");
@@ -1166,6 +1245,16 @@
 
             // Sync visual targets mapped onto the Leaflet Canvas
             syncMapMarkers(filtered);
+            
+            // Ensure HUD remains updated with live moving data if a target is actively selected
+            if (activeSelectedHex) {
+                const livePlane = aircraftList.find(p => p.hex === activeSelectedHex);
+                if (livePlane) {
+                    showHUD(livePlane);
+                } else {
+                    hideHUD(); // Plane flew out of range
+                }
+            }
         }
 
         // Helper calculations for visual stats indicators
@@ -1271,6 +1360,42 @@
 
         let activeSelectedHex = null;
 
+        // Custom Overlay Display
+        function showHUD(plane) {
+            const hud = document.getElementById('hud-overlay');
+            const speed = plane.gs ? `${Math.round(plane.gs)} kts` : 'N/A';
+            const heading = plane.track !== undefined && plane.track !== null ? `${Math.round(plane.track)}°` : 'N/A';
+            const altitude = plane.alt_baro === 'ground' ? 'Ground' : (plane.alt_baro || 0).toLocaleString() + ' ft';
+            
+            hud.innerHTML = `
+                <div class="flex items-center justify-between border-b border-slate-700 pb-2 mb-2">
+                    <div class="flex items-center gap-2">
+                        <h4 class="font-bold text-base text-white mono">${plane.flight ? plane.flight.trim() : 'UNKNOWN'}</h4>
+                        ${plane.isMilitary ? `<span class="bg-sky-500/15 text-sky-400 border border-sky-500/30 text-[9px] px-1.5 py-0.5 rounded font-bold">MIL</span>` : ''}
+                        ${plane.isEmergency ? `<span class="bg-red-500/25 text-red-400 border border-red-500/40 text-[9px] px-1.5 py-0.5 rounded font-bold animate-pulse">EMERGENCY</span>` : ''}
+                    </div>
+                    <button onclick="hideHUD()" class="text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-full w-6 h-6 flex items-center justify-center transition-colors">✕</button>
+                </div>
+                <div class="grid grid-cols-2 gap-x-4 gap-y-2 text-xs text-slate-300">
+                    <div>Type: <strong class="text-white">${plane.t || 'N/A'}</strong></div>
+                    <div>Reg: <strong class="text-white">${plane.r || 'N/A'}</strong></div>
+                    <div>Alt: <strong class="${plane.alt_baro === 'ground' ? 'text-amber-500' : 'text-emerald-400'}">${altitude}</strong></div>
+                    <div>Speed: <strong class="text-white">${speed}</strong></div>
+                    <div>Track: <strong class="text-white">${heading}</strong></div>
+                    <div>Dist: <strong class="text-radar-glow">${plane.calculatedDistance.toFixed(1)} mi</strong></div>
+                </div>
+                ${plane.squawk ? `<div class="mt-2 text-[10px] pt-2 border-t border-slate-700/50 text-slate-400">Squawk: <span class="font-mono text-slate-200">${plane.squawk}</span></div>` : ''}
+                <div class="mt-2 text-[9px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded inline-block font-mono border border-slate-700">HEX: ${plane.hex ? plane.hex.toUpperCase() : ''}</div>
+            `;
+            hud.classList.remove('hidden');
+        }
+
+        function hideHUD() {
+            activeSelectedHex = null;
+            document.getElementById('hud-overlay').classList.add('hidden');
+            renderListPanel(aircraftList); // Clear side selection
+        }
+
         // Visual Marker Mapping synchronize routine
         function syncMapMarkers(activePlanes) {
             const currentHexCodes = new Set(activePlanes.map(p => p.hex));
@@ -1295,55 +1420,38 @@
                 if (isEmergency) colorTheme = '#EF4444'; // Red emergency alert
                 else if (plane.alt_baro === "ground") colorTheme = '#F59E0B'; // Amber ground
 
-                const planeIconHtml = getPlaneIconSVG(plane.track, colorTheme, isMilitary);
+                // Calculate Elite Stalk Parallax offset
+                const altitude = plane.alt_baro === "ground" ? 0 : (parseInt(plane.alt_baro) || 0);
                 
+                // Scale visual height for the stalk 
+                const stalkHeight = Math.min(Math.max(altitude / 150, 0), 180);
+
+                const planeIconHtml = get2_5DMarkerHTML(plane, colorTheme, stalkHeight);
+                
+                // 2.5D Marker Container bounds. Anchor is mathematically set to exact bottom center.
                 const customDivIcon = L.divIcon({
                     className: 'custom-plane-marker',
                     html: planeIconHtml,
-                    iconSize: [40, 40],
-                    iconAnchor: [20, 20],
-                    popupAnchor: [0, -15]
+                    iconSize: [200, 220],
+                    iconAnchor: [100, 220] 
                 });
 
-                // Popup content string
-                const popupContent = `
-                    <div class="text-xs p-1.5 space-y-2 min-w-[200px]">
-                        <div class="flex items-center justify-between border-b border-slate-700 pb-1.5">
-                            <h4 class="font-bold text-sm text-white mono">${plane.flight ? plane.flight.trim() : 'N/A'}</h4>
-                            <span class="text-[9px] bg-slate-800 text-slate-400 px-1 py-0.5 rounded font-mono">${plane.hex ? plane.hex.toUpperCase() : ''}</span>
-                        </div>
-                        <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-slate-300">
-                            <div>Type: <strong class="text-white">${plane.t || 'Unknown'}</strong></div>
-                            <div>Reg: <strong class="text-white">${plane.r || 'N/A'}</strong></div>
-                            <div>Alt: <strong class="text-emerald-400">${plane.alt_baro === 'ground' ? 'Ground' : (plane.alt_baro || 0).toLocaleString() + 'ft'}</strong></div>
-                            <div>Speed: <strong class="text-white">${plane.gs ? Math.round(plane.gs) + ' kts' : 'N/A'}</strong></div>
-                            <div>Track: <strong class="text-white">${plane.track !== undefined && plane.track !== null ? Math.round(plane.track) + '°' : 'N/A'}</strong></div>
-                            <div>Dist: <strong class="text-radar-glow">${plane.calculatedDistance.toFixed(1)} mi</strong></div>
-                        </div>
-                        ${plane.squawk ? `<div class="text-[10px] pt-1 border-t border-slate-700/50 text-slate-400">Squawk: <span class="font-mono text-slate-200">${plane.squawk}</span></div>` : ''}
-                    </div>
-                `;
+                // Z-index calculation to force higher planes to render OVER lower planes visually
+                const altZIndex = altitude > 0 ? 1000 + Math.floor(altitude / 10) : 100;
 
                 if (mapMarkers[plane.hex]) {
-                    // Update positional lat/lon and bearing icons gracefully
+                    // Update positional lat/lon, bearing, and altitude cleanly
                     const existingMarker = mapMarkers[plane.hex];
                     existingMarker.setLatLng(coord);
                     existingMarker.setIcon(customDivIcon);
-                    
-                    // Update active popups if already visible on screen
-                    const popup = existingMarker.getPopup();
-                    if (popup && popup.isOpen()) {
-                        existingMarker.setPopupContent(popupContent);
-                    } else {
-                        existingMarker.bindPopup(popupContent);
-                    }
+                    existingMarker.setZIndexOffset(altZIndex);
                 } else {
                     // Instantiation loop of new target
-                    const marker = L.marker(coord, { icon: customDivIcon }).addTo(map);
-                    marker.bindPopup(popupContent);
+                    const marker = L.marker(coord, { icon: customDivIcon, zIndexOffset: altZIndex }).addTo(map);
                     
                     // Bind map element clicks to side detailed selection syncing
-                    marker.on('click', () => {
+                    marker.on('click', (e) => {
+                        L.DomEvent.stopPropagation(e); // Stop the map background from immediately registering the click and closing the HUD
                         focusOnPlane(plane.hex, false);
                     });
 
@@ -1356,25 +1464,16 @@
         function focusOnPlane(hex, panMap = true) {
             activeSelectedHex = hex;
             
-            // Re-render only list styling boundaries
-            const planes = aircraftList.filter(plane => {
-                if (plane.lat === undefined || plane.lon === undefined) return false;
-                if (currentFilters.milOnly && !plane.isMilitary) return false;
-                if (currentFilters.emergencyOnly && !plane.isEmergency) return false;
-                if (currentFilters.groundOnly && plane.alt_baro !== "ground") return false;
-                if (currentFilters.airborneOnly && plane.alt_baro === "ground") return false;
-                if (plane.calculatedDistance > activeRadius) return false;
-                return true;
-            });
-            renderListPanel(planes);
+            // Highlight list selection
+            renderListPanel(aircraftList);
+            
+            const plane = aircraftList.find(p => p.hex === hex);
+            if (plane) showHUD(plane);
 
-            // Fetch specific marker instance
+            // Fetch specific marker instance to pan
             const marker = mapMarkers[hex];
-            if (marker) {
-                if (panMap) {
-                    map.setView(marker.getLatLng(), 11, { animate: true });
-                }
-                marker.openPopup();
+            if (marker && panMap) {
+                map.setView(marker.getLatLng(), 11, { animate: true });
             }
         }
 
