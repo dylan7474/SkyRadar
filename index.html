@@ -138,6 +138,34 @@
         .plane-svg-wrapper:hover {
             transform: scale(1.2);
         }
+        .selected-plane-target .plane-svg-wrapper {
+            animation: selected-plane-flash 0.9s ease-in-out infinite;
+        }
+        .selected-plane-target .aircraft-label {
+            border-left-width: 3px !important;
+            box-shadow: 0 0 18px rgba(16, 185, 129, 0.7), 0 4px 10px rgba(0,0,0,0.35) !important;
+        }
+        .selected-plane-target-ring {
+            position: absolute;
+            left: 79px;
+            width: 42px;
+            height: 42px;
+            border: 2px solid #f8fafc;
+            border-radius: 9999px;
+            box-shadow: 0 0 16px #10B981, inset 0 0 12px rgba(16,185,129,0.35);
+            opacity: 0.95;
+            animation: selected-plane-ring 0.9s ease-in-out infinite;
+            pointer-events: none;
+            z-index: 6;
+        }
+        @keyframes selected-plane-flash {
+            0%, 100% { filter: drop-shadow(0 0 4px #f8fafc) drop-shadow(0 0 12px #10B981); transform: scale(1); }
+            50% { filter: drop-shadow(0 0 10px #f8fafc) drop-shadow(0 0 22px #10B981); transform: scale(1.28); }
+        }
+        @keyframes selected-plane-ring {
+            0%, 100% { opacity: 0.35; transform: scale(0.86); }
+            50% { opacity: 1; transform: scale(1.18); }
+        }
 
         /* Keep Leaflet's panes in their default projection so map tiles,
            aircraft markers, range rings, and the user marker share the same
@@ -594,6 +622,7 @@
         let userMarker = null;
         let radarCircle = null;
         let aircraftList = [];
+        let lastRenderedPlanes = [];
         let mapMarkers = {}; // Map of hex codes to leaflet markers
         let currentFilters = {
             search: '',
@@ -609,7 +638,7 @@
         const cockpitRangeMiles = 15;
         const cockpitTrackHistory = {};
         // Custom SVGs for crisp 2.5D Parallax Markers
-        function get2_5DMarkerHTML(plane, colorTheme, stalkHeight) {
+        function get2_5DMarkerHTML(plane, colorTheme, stalkHeight, isSelected = false) {
             const rotAngle = plane.track !== undefined && plane.track !== null ? Math.round(plane.track) : 0;
             const isMilitary = plane.isMilitary;
             const outlineColor = isMilitary ? '#38BDF8' : colorTheme;
@@ -649,11 +678,16 @@
                 </div>
             `;
 
+            const selectedRingHtml = isSelected
+                ? `<div class="selected-plane-target-ring" style="bottom: ${stalkHeight - 21}px;"></div>`
+                : '';
+
             // Wrapper container fixed at 200px width. Anchor is exactly center [100, 220]
             return `
-                <div style="position: relative; width: 200px; height: 220px; pointer-events: none;">
+                <div class="${isSelected ? 'selected-plane-target' : ''}" style="position: relative; width: 200px; height: 220px; pointer-events: none;">
                     ${stalkHtml}
                     ${groundHtml}
+                    ${selectedRingHtml}
                     ${planeHtml}
                     ${labelHtml}
                 </div>
@@ -1363,6 +1397,8 @@
                 return 0;
             });
 
+            lastRenderedPlanes = filtered;
+
             // Render stats bar on side panel
             updateStatisticsDisplay(filtered);
 
@@ -1521,7 +1557,8 @@
             activeSelectedHex = null;
             document.getElementById('hud-overlay').classList.add('hidden');
             hideCockpitView();
-            renderListPanel(aircraftList); // Clear side selection
+            renderListPanel(lastRenderedPlanes); // Clear side selection while preserving active filters
+            syncMapMarkers(lastRenderedPlanes);
         }
 
         function hideCockpitView() {
@@ -2005,7 +2042,7 @@
                 // while high altitude targets are compressed beautifully within the 180px limit.
                 const stalkHeight = plane.alt_baro === "ground" ? 0 : Math.min(0.9 * Math.sqrt(altitude), 180);
 
-                const planeIconHtml = get2_5DMarkerHTML(plane, colorTheme, stalkHeight);
+                const planeIconHtml = get2_5DMarkerHTML(plane, colorTheme, stalkHeight, activeSelectedHex === plane.hex);
                 
                 // 2.5D Marker Container bounds. Anchor is mathematically set to exact bottom center.
                 const customDivIcon = L.divIcon({
@@ -2016,7 +2053,7 @@
                 });
 
                 // Z-index calculation to force higher planes to render OVER lower planes visually
-                const altZIndex = altitude > 0 ? 1000 + Math.floor(altitude / 10) : 100;
+                const altZIndex = (altitude > 0 ? 1000 + Math.floor(altitude / 10) : 100) + (activeSelectedHex === plane.hex ? 100000 : 0);
 
                 if (mapMarkers[plane.hex]) {
                     // Update positional lat/lon, bearing, and altitude cleanly
@@ -2044,10 +2081,11 @@
             activeSelectedHex = hex;
             
             // Highlight list selection
-            renderListPanel(aircraftList);
+            renderListPanel(lastRenderedPlanes);
             
             const plane = aircraftList.find(p => p.hex === hex);
             if (plane) showHUD(plane);
+            syncMapMarkers(lastRenderedPlanes);
 
             // Fetch specific marker instance to pan
             const marker = mapMarkers[hex];
