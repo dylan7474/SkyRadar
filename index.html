@@ -1,0 +1,1446 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SkyRadar - Local ADS-B Flight Tracker</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        radar: {
+                            base: '#0B0F19',
+                            dark: '#070a12',
+                            glow: '#10B981',
+                            accent: '#F59E0B',
+                            danger: '#EF4444',
+                            panel: '#1E293B',
+                            border: '#334155'
+                        }
+                    },
+                    animation: {
+                        'pulse-glow': 'pulse-glow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                        'radar-sweep': 'radar-sweep 4s linear infinite',
+                    },
+                    keyframes: {
+                        'pulse-glow': {
+                            '0%, 100%': { opacity: 1, transform: 'scale(1)' },
+                            '50%': { opacity: .5, transform: 'scale(1.05)' },
+                        },
+                        'radar-sweep': {
+                            'from': { transform: 'rotate(0deg)' },
+                            'to': { transform: 'rotate(360deg)' }
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Leaflet Map CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <style>
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background-color: #070a12;
+        }
+        .mono {
+            font-family: 'JetBrains Mono', monospace;
+        }
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0B0F19;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #10B981;
+        }
+        /* Leaflet custom overrides for dark mode */
+        .leaflet-container {
+            background-color: #070a12 !important;
+            font-family: inherit;
+        }
+        .leaflet-popup-content-wrapper, .leaflet-popup-tip {
+            background: #1E293B !important;
+            color: #F8FAFC !important;
+            border: 1px solid #334155;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+            border-radius: 0.5rem;
+        }
+        .leaflet-popup-close-button {
+            color: #94A3B8 !important;
+        }
+        /* Radar sweep effect overlay */
+        .radar-sweep-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            overflow: hidden;
+            z-index: 400;
+            opacity: 0.04;
+        }
+        .radar-line {
+            width: 200%;
+            height: 200%;
+            background: conic-gradient(from 0deg, #10B981 0deg, transparent 90deg, transparent 360deg);
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            transform-origin: center center;
+            animation: radar-sweep 4s linear infinite;
+        }
+        /* Pulse Animation for active rings */
+        .user-pulse-marker {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .pulse-core {
+            width: 10px;
+            height: 10px;
+            background-color: #3B82F6;
+            border-radius: 50%;
+            box-shadow: 0 0 8px #3B82F6;
+        }
+        .pulse-ring {
+            position: absolute;
+            width: 30px;
+            height: 30px;
+            border: 2px solid #3B82F6;
+            border-radius: 50%;
+            animation: pulse-ring-anim 2s ease-out infinite;
+            opacity: 0;
+        }
+        @keyframes pulse-ring-anim {
+            0% { transform: scale(0.5); opacity: 0.8; }
+            100% { transform: scale(2.2); opacity: 0; }
+        }
+    </style>
+</head>
+<body class="text-slate-100 min-h-screen flex flex-col antialiased">
+
+    <!-- Header Section -->
+    <header class="bg-radar-base border-b border-radar-border px-4 py-3 flex flex-wrap items-center justify-between gap-4 sticky top-0 z-50 shadow-lg">
+        <div class="flex items-center space-x-3">
+            <div class="relative w-9 h-9 bg-radar-glow/10 border border-radar-glow/40 rounded-lg flex items-center justify-center text-radar-glow shadow-[0_0_10px_rgba(16,185,129,0.15)]">
+                <svg class="w-5 h-5 animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"/>
+                </svg>
+            </div>
+            <div>
+                <h1 class="text-lg font-bold tracking-tight text-white flex items-center gap-2">
+                    SkyRadar <span class="text-xs bg-radar-glow/20 text-radar-glow px-2 py-0.5 rounded border border-radar-glow/30">ADS-B LIVE</span>
+                </h1>
+                <p class="text-xs text-slate-400">Local Air Traffic Surveillance</p>
+            </div>
+        </div>
+
+        <!-- Coordinates Status / Quick Controls -->
+        <div class="flex flex-wrap items-center gap-3 text-sm">
+            <!-- Geolocation Badge -->
+            <div id="geo-status-badge" class="bg-slate-800/80 border border-slate-700 rounded-lg px-3 py-1.5 flex items-center space-x-2 text-slate-300">
+                <span class="w-2.5 h-2.5 bg-yellow-500 rounded-full animate-ping" id="geo-indicator"></span>
+                <span class="text-xs" id="geo-text">Acquiring Location...</span>
+            </div>
+
+            <!-- Radius Config -->
+            <div class="flex items-center space-x-2 bg-slate-800/80 border border-slate-700 rounded-lg p-1">
+                <label for="radius-select" class="text-xs text-slate-400 px-2 font-medium">Radius:</label>
+                <select id="radius-select" class="bg-radar-base text-slate-200 text-xs border-0 rounded px-2.5 py-1 focus:ring-1 focus:ring-radar-glow focus:outline-none">
+                    <option value="10">10 Miles</option>
+                    <option value="25">25 Miles</option>
+                    <option value="50" selected>50 Miles</option>
+                    <option value="100">100 Miles</option>
+                    <option value="150">150 Miles</option>
+                </select>
+            </div>
+
+            <!-- Manual Coordinate Override Button -->
+            <button id="btn-manual-loc" class="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                Adjust Location
+            </button>
+
+            <!-- Auto-Refresh Tracker -->
+            <button id="btn-refresh" class="bg-radar-glow/10 hover:bg-radar-glow/20 text-radar-glow border border-radar-glow/30 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all">
+                <svg id="refresh-icon" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.253 8H18.2M7 9a4 4 0 111-8v2"/></svg>
+                <span id="refresh-timer-txt">Auto Updates ON</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- App Message Container -->
+    <div id="notification-container" class="fixed bottom-5 right-5 z-[2000] flex flex-col gap-2 max-w-md w-full px-4 md:px-0 pointer-events-none"></div>
+
+    <!-- Main Dashboard Body -->
+    <main class="flex-grow grid grid-cols-1 lg:grid-cols-12 gap-0 overflow-hidden relative">
+        
+        <!-- Sidebar / Aircraft List (Grid 4) -->
+        <section class="lg:col-span-5 xl:col-span-4 bg-radar-base border-r border-radar-border flex flex-col h-[45vh] lg:h-auto overflow-hidden order-2 lg:order-1">
+            
+            <!-- Tab Selection Bar -->
+            <div class="flex border-b border-radar-border bg-slate-900/60">
+                <button id="tab-aircraft" class="flex-1 py-2.5 text-xs font-bold border-b-2 border-radar-glow text-white tracking-wider uppercase transition-all">
+                    Aircraft View
+                </button>
+                <button id="tab-logs" class="flex-1 py-2.5 text-xs font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-200 tracking-wider uppercase flex items-center justify-center gap-2 transition-all">
+                    System logs
+                    <span id="log-warn-dot" class="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse hidden"></span>
+                </button>
+            </div>
+
+            <!-- TAB 1: AIRCRAFT PANEL VIEW -->
+            <div id="panel-aircraft-view" class="flex flex-col flex-grow overflow-hidden">
+                <div class="p-4 border-b border-radar-border space-y-3 bg-slate-900/40">
+                    <!-- Search -->
+                    <div class="relative">
+                        <input type="text" id="search-input" placeholder="Search Call-Sign, ICAO Hex, Type..." class="w-full bg-slate-950 border border-radar-border rounded-lg pl-9 pr-4 py-2 text-xs focus:ring-1 focus:ring-radar-glow focus:border-radar-glow focus:outline-none placeholder-slate-500 text-white">
+                        <svg class="w-4 h-4 text-slate-500 absolute left-3 top-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                    </div>
+
+                    <!-- Stats Badges -->
+                    <div class="grid grid-cols-4 gap-2 text-center text-xs">
+                        <div class="bg-slate-950/70 rounded-lg p-2 border border-slate-800">
+                            <div class="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">In Range</div>
+                            <div id="stat-total" class="text-base font-bold text-white mono">0</div>
+                        </div>
+                        <div class="bg-slate-950/70 rounded-lg p-2 border border-slate-800">
+                            <div class="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Military</div>
+                            <div id="stat-military" class="text-base font-bold text-sky-400 mono">0</div>
+                        </div>
+                        <div class="bg-slate-950/70 rounded-lg p-2 border border-slate-800">
+                            <div class="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Emergency</div>
+                            <div id="stat-emergency" class="text-base font-bold text-radar-danger animate-pulse mono">0</div>
+                        </div>
+                        <div class="bg-slate-950/70 rounded-lg p-2 border border-slate-800">
+                            <div class="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Avg Alt</div>
+                            <div id="stat-avg-alt" class="text-base font-bold text-emerald-400 mono">--</div>
+                        </div>
+                    </div>
+
+                    <!-- Toggle Buttons -->
+                    <div class="flex flex-wrap gap-1.5 pt-1">
+                        <button id="toggle-mil" class="px-2.5 py-1 text-[11px] font-medium rounded-full bg-slate-800 border border-slate-700 hover:border-slate-500 transition-colors flex items-center gap-1 text-slate-300">
+                            <span class="w-1.5 h-1.5 rounded-full bg-sky-400"></span>
+                            Mil Only
+                        </button>
+                        <button id="toggle-emergency" class="px-2.5 py-1 text-[11px] font-medium rounded-full bg-slate-800 border border-slate-700 hover:border-slate-500 transition-colors flex items-center gap-1 text-slate-300">
+                            <span class="w-1.5 h-1.5 rounded-full bg-red-500"></span>
+                            Emergencies
+                        </button>
+                        <button id="toggle-ground" class="px-2.5 py-1 text-[11px] font-medium rounded-full bg-slate-800 border border-slate-700 hover:border-slate-500 transition-colors flex items-center gap-1 text-slate-300">
+                            <span class="w-1.5 h-1.5 rounded-full bg-yellow-400"></span>
+                            On Ground
+                        </button>
+                        <button id="toggle-airborne" class="px-2.5 py-1 text-[11px] font-medium rounded-full bg-slate-800 border border-slate-700 hover:border-slate-500 transition-colors flex items-center gap-1 text-slate-300">
+                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                            Airborne
+                        </button>
+                    </div>
+
+                    <!-- Sort Control -->
+                    <div class="flex items-center justify-between text-xs text-slate-400 pt-1">
+                        <span>Sort by:</span>
+                        <div class="flex space-x-3">
+                            <button id="sort-dist" class="text-radar-glow font-bold focus:outline-none">Distance</button>
+                            <button id="sort-alt" class="hover:text-slate-200 focus:outline-none">Altitude</button>
+                            <button id="sort-speed" class="hover:text-slate-200 focus:outline-none">Speed</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Aircraft Scrollable List -->
+                <div id="aircraft-list" class="flex-grow overflow-y-auto divide-y divide-radar-border/40 bg-slate-950/20">
+                    <div id="list-placeholder" class="py-12 px-4 text-center space-y-3">
+                        <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-radar-glow"></div>
+                        <p class="text-sm text-slate-400">Searching airspace skies near you...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB 2: SYSTEM LOGS DIAGNOSTIC TERMINAL -->
+            <div id="panel-logs-view" class="flex-grow flex flex-col overflow-hidden hidden bg-slate-950">
+                <!-- Terminal Toolbar -->
+                <div class="p-3 border-b border-radar-border flex items-center justify-between bg-slate-900/60 text-xs">
+                    <div class="flex items-center gap-2">
+                        <span class="w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse"></span>
+                        <span class="font-bold text-slate-300 tracking-wider uppercase">Console Monitor</span>
+                    </div>
+                    <div class="flex items-center gap-1.5">
+                        <button id="btn-inject-demo" class="bg-indigo-950 hover:bg-indigo-900 border border-indigo-700/60 text-indigo-200 px-2 py-1 rounded text-[10px] transition-all font-semibold uppercase tracking-tight">
+                            ⚡ Inject Demo Targets
+                        </button>
+                        <button id="btn-copy-logs" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded text-[10px] transition-all font-semibold uppercase tracking-tight">
+                            Copy
+                        </button>
+                        <button id="btn-clear-logs" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded text-[10px] transition-all font-semibold uppercase tracking-tight">
+                            Clear
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Terminal Diagnostic Output -->
+                <div id="terminal-output" class="flex-grow p-4 overflow-y-auto mono text-[11px] leading-relaxed space-y-2 select-text selection:bg-radar-glow selection:text-black">
+                    <!-- Dynamic logs injected here -->
+                </div>
+
+                <div class="p-2 border-t border-radar-border bg-slate-900/80 text-[10px] text-slate-400 flex justify-between items-center px-4">
+                    <span>Logs Filter: <strong class="text-radar-glow">ALL</strong></span>
+                    <span>Direct Handshake & Failovers Captured</span>
+                </div>
+            </div>
+
+            <!-- Powered and status footnote -->
+            <div class="bg-radar-dark border-t border-radar-border p-2 px-4 flex justify-between items-center text-[10px] text-slate-500">
+                <span>Data source: <a href="https://airplanes.live" target="_blank" class="text-radar-glow hover:underline">airplanes.live Open API</a></span>
+                <span id="last-updated-tag" class="mono">Never Updated</span>
+            </div>
+        </section>
+
+        <!-- Main Map Area (Grid 8) -->
+        <section class="lg:col-span-7 xl:col-span-8 h-[55vh] lg:h-auto relative flex flex-col order-1 lg:order-2">
+            <!-- Leaflet Map Container -->
+            <div id="map" class="w-full flex-grow z-10"></div>
+            
+            <!-- Map Decorative Radar Overlay -->
+            <div class="radar-sweep-container">
+                <div class="radar-line"></div>
+            </div>
+
+            <!-- Calibration indicator inside map UI -->
+            <div class="absolute bottom-4 left-4 bg-radar-base/90 backdrop-blur border border-radar-border rounded-lg p-3 z-30 text-xs shadow-xl hidden sm:block max-w-[200px]">
+                <h4 class="font-bold text-white mb-1.5 flex items-center gap-1.5">
+                    <span class="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></span>
+                    Coverage Radar
+                </h4>
+                <div class="space-y-1 text-slate-400">
+                    <p class="flex justify-between"><span>User Target:</span> <strong class="text-slate-200" id="radar-lbl-center">--</strong></p>
+                    <p class="flex justify-between"><span>Boundary limit:</span> <strong class="text-slate-200" id="radar-lbl-radius">50 mi</strong></p>
+                    <p class="flex justify-between"><span>System Status:</span> <strong class="text-emerald-400" id="radar-lbl-status">Nominal</strong></p>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Dialog / Manual Coordinates Prompt Modal -->
+    <div id="modal-coords" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 z-[9999] transition-all">
+        <div class="bg-radar-panel border border-radar-border rounded-xl shadow-2xl max-w-md w-full p-6 text-slate-100">
+            <h3 class="text-lg font-bold text-white mb-2 flex items-center gap-2">
+                <svg class="w-5 h-5 text-radar-glow" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                Adjust Ground Radar Station
+            </h3>
+            <p class="text-xs text-slate-400 mb-4">Overwrite automatically calculated geolocation coordinates or enter custom parameters to scout other worldwide airspaces.</p>
+            
+            <div class="space-y-3.5">
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1" for="manual-lat">Latitude</label>
+                    <input type="number" step="0.00001" id="manual-lat" class="w-full bg-slate-950 border border-radar-border rounded-lg px-3 py-2 text-sm text-white focus:ring-1 focus:ring-radar-glow focus:outline-none" placeholder="e.g. 51.5074">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1" for="manual-lon">Longitude</label>
+                    <input type="number" step="0.00001" id="manual-lon" class="w-full bg-slate-950 border border-radar-border rounded-lg px-3 py-2 text-sm text-white focus:ring-1 focus:ring-radar-glow focus:outline-none" placeholder="e.g. -0.1278">
+                </div>
+                <div>
+                    <span class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Quick Airspace Presets</span>
+                    <div class="grid grid-cols-2 gap-2">
+                        <button type="button" onclick="setPresetCoords(51.4700, -0.4543, 'London Heathrow (EGLL)')" class="bg-slate-950 hover:bg-slate-900 border border-slate-800 text-left px-2.5 py-1.5 rounded text-xs truncate transition-all text-slate-300">
+                            🇬🇧 London Heathrow
+                        </button>
+                        <button type="button" onclick="setPresetCoords(40.6413, -73.7781, 'New York JFK (KJFK)')" class="bg-slate-950 hover:bg-slate-900 border border-slate-800 text-left px-2.5 py-1.5 rounded text-xs truncate transition-all text-slate-300">
+                            🇺🇸 JFK International
+                        </button>
+                        <button type="button" onclick="setPresetCoords(33.9416, -118.4085, 'Los Angeles (KLAX)')" class="bg-slate-950 hover:bg-slate-900 border border-slate-800 text-left px-2.5 py-1.5 rounded text-xs truncate transition-all text-slate-300">
+                            🇺🇸 Los Angeles LAX
+                        </button>
+                        <button type="button" onclick="setPresetCoords(49.0097, 2.5479, 'Paris CDG (LFPG)')" class="bg-slate-950 hover:bg-slate-900 border border-slate-800 text-left px-2.5 py-1.5 rounded text-xs truncate transition-all text-slate-300">
+                            🇫🇷 Paris Charles de Gaulle
+                        </button>
+                        <button type="button" onclick="setPresetCoords(35.7720, 140.3929, 'Tokyo Narita (RJAA)')" class="bg-slate-950 hover:bg-slate-900 border border-slate-800 text-left px-2.5 py-1.5 rounded text-xs truncate transition-all text-slate-300">
+                            🇯🇵 Tokyo Narita
+                        </button>
+                        <button type="button" onclick="setPresetCoords(-33.9461, 151.1772, 'Sydney Kingsford (YSSY)')" class="bg-slate-950 hover:bg-slate-900 border border-slate-800 text-left px-2.5 py-1.5 rounded text-xs truncate transition-all text-slate-300">
+                            🇦🇺 Sydney Kingsford
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex justify-end gap-3 mt-6">
+                <button type="button" id="btn-coords-cancel" class="px-4 py-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 text-xs font-semibold transition-all">
+                    Cancel
+                </button>
+                <button type="button" id="btn-coords-save" class="bg-radar-glow hover:bg-emerald-600 text-slate-950 px-4 py-2 rounded-lg text-xs font-bold transition-all">
+                    Apply Coordinates
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Leaflet Map JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    
+    <!-- Application Logic -->
+    <script>
+        // Custom Logger framework redirecting console alerts
+        const logger = {
+            logs: [],
+            add: function(message, type = 'info', rawDetail = null) {
+                const now = new Date();
+                const timestamp = now.toLocaleTimeString() + '.' + String(now.getMilliseconds()).padStart(3, '0');
+                const logEntry = { timestamp, message, type, rawDetail };
+                this.logs.push(logEntry);
+                
+                // Trim logs if they grow excessively
+                if (this.logs.length > 500) this.logs.shift();
+
+                // Append HTML to container
+                const terminal = document.getElementById('terminal-output');
+                if (terminal) {
+                    const row = document.createElement('div');
+                    row.className = `py-1 border-b border-slate-900 flex flex-col gap-0.5 select-text`;
+                    
+                    let typeClass = 'text-blue-400';
+                    if (type === 'success') typeClass = 'text-emerald-400';
+                    if (type === 'warning') typeClass = 'text-amber-500 font-medium';
+                    if (type === 'error') {
+                        typeClass = 'text-red-500 font-bold';
+                        const dot = document.getElementById('log-warn-dot');
+                        if (dot) dot.classList.remove('hidden');
+                    }
+
+                    let rawStr = '';
+                    if (rawDetail) {
+                        try {
+                            rawStr = typeof rawDetail === 'object' ? JSON.stringify(rawDetail) : String(rawDetail);
+                            rawStr = `<pre class="mt-1 p-1.5 bg-slate-950 rounded text-[10px] text-slate-400 overflow-x-auto max-w-full font-mono">${rawStr.substring(0, 800)}</pre>`;
+                        } catch (e) {
+                            rawStr = `<span class="text-xs text-rose-300">Unparsable stack details</span>`;
+                        }
+                    }
+
+                    row.innerHTML = `
+                        <div>
+                            <span class="text-slate-500 font-light">[${timestamp}]</span> 
+                            <span class="${typeClass} font-mono font-semibold uppercase">[${type}]</span> 
+                            <span class="text-slate-200 font-mono">${message}</span>
+                        </div>
+                        ${rawStr}
+                    `;
+                    terminal.appendChild(row);
+                    // Scroll terminal viewport to bottom
+                    terminal.scrollTop = terminal.scrollHeight;
+                }
+            },
+            clear: function() {
+                this.logs = [];
+                const terminal = document.getElementById('terminal-output');
+                if (terminal) terminal.innerHTML = `<div class="text-slate-500 italic">Terminal memory flushed. Waiting for next air traffic event loop...</div>`;
+                const dot = document.getElementById('log-warn-dot');
+                if (dot) dot.classList.add('hidden');
+            }
+        };
+
+        // Hook native console commands to feed our tactical terminal log window
+        const _originalLog = console.log;
+        const _originalWarn = console.warn;
+        const _originalError = console.error;
+
+        console.log = function(...args) {
+            _originalLog.apply(console, args);
+            logger.add(args.join(' '), 'info');
+        };
+        console.warn = function(...args) {
+            _originalWarn.apply(console, args);
+            logger.add(args.join(' '), 'warning');
+        };
+        console.error = function(...args) {
+            _originalError.apply(console, args);
+            // Detect stacks if available
+            const err = args[0];
+            const detail = err instanceof Error ? { name: err.name, msg: err.message, stack: err.stack } : args.slice(1);
+            logger.add(args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' '), 'error', detail);
+        };
+
+        // Window error hook to catch everything
+        window.addEventListener('error', function(event) {
+            logger.add(`Global Unhandled Exception: ${event.message} at ${event.filename}:${event.lineno}`, 'error', {
+                col: event.colno,
+                error: event.error
+            });
+        });
+
+        // State variables
+        let userLocation = { lat: 51.5074, lon: -0.1278 }; // Default London
+        let activeRadius = 50; // Statute miles
+        let autoRefreshInterval = 10000; // 10s refresh loop
+        let isAutoRefreshing = true;
+        let map = null;
+        let userMarker = null;
+        let radarCircle = null;
+        let aircraftList = [];
+        let mapMarkers = {}; // Map of hex codes to leaflet markers
+        let currentFilters = {
+            search: '',
+            milOnly: false,
+            emergencyOnly: false,
+            groundOnly: false,
+            airborneOnly: false,
+            sortBy: 'dist' // 'dist', 'alt', 'speed'
+        };
+        let refreshTimeoutId = null;
+        let locationAcquired = false;
+        let isSimulatingDemo = false;
+
+        // Custom SVGs for Airplane category display & rotation mapping
+        function getPlaneIconSVG(trackAngle, color = '#10B981', isMilitary = false) {
+            const rotAngle = trackAngle !== undefined && trackAngle !== null ? trackAngle : 0;
+            const outlineColor = isMilitary ? '#38BDF8' : color;
+            return `
+                <div style="transform: rotate(${rotAngle}deg); width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; transition: transform 0.8s ease-in-out;">
+                    <svg viewBox="0 0 512 512" style="width: 30px; height: 30px; fill: ${outlineColor}; filter: drop-shadow(0px 0px 4px rgba(0, 0, 0, 0.7));">
+                        <path d="M448 336v-40L288 192V79.2c0-26.1-20.9-47.2-47-47.2s-47 21.1-47 47.2V192L32 296v40l160-48v117.8l-42.6 32v24.2l82.6-22.1 82.6 22.1v-24.2L272 445.8V328l160 8z" />
+                    </svg>
+                </div>
+            `;
+        }
+
+        // Initialize App on DOM Loaded
+        document.addEventListener('DOMContentLoaded', () => {
+            logger.add("SkyRadar launched. Initializing mapping engines...", "info");
+            initLeafletMap();
+            requestUserLocation();
+            setupEventListeners();
+        });
+
+        // Initialize Map setup
+        function initLeafletMap() {
+            try {
+                // Instantiate the map centered initially on userLocation default
+                map = L.map('map', {
+                    zoomControl: true,
+                    attributionControl: false
+                }).setView([userLocation.lat, userLocation.lon], 9);
+
+                // Leaflet dark theme tile layer - CartoDB Dark Matter (does not require custom API key)
+                L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                    maxZoom: 20
+                }).addTo(map);
+
+                // Add custom scale
+                L.control.scale({ position: 'bottomright' }).addTo(map);
+                
+                logger.add("Leaflet interactive coordinates canvas established successfully.", "success");
+            } catch(e) {
+                logger.add("Map failed to load correctly: " + e.message, "error", e);
+            }
+
+            // Build markers & radius rings
+            updateMapContext();
+        }
+
+        // Create user visual target marker and distance perimeter circle
+        function updateMapContext() {
+            const coordArray = [userLocation.lat, userLocation.lon];
+            
+            // Set/update pulsing blue marker
+            if (!userMarker) {
+                const pulsingIcon = L.divIcon({
+                    className: 'user-pulse-marker',
+                    html: '<div class="pulse-ring"></div><div class="pulse-core"></div>',
+                    iconSize: [30, 30]
+                });
+                userMarker = L.marker(coordArray, { icon: pulsingIcon }).addTo(map);
+            } else {
+                userMarker.setLatLng(coordArray);
+            }
+
+            // Set/update 50 miles perimeter border circle (50 miles = 80,467 meters)
+            const radiusMeters = activeRadius * 1609.34;
+            if (!radarCircle) {
+                radarCircle = L.circle(coordArray, {
+                    radius: radiusMeters,
+                    color: '#10B981',
+                    weight: 1,
+                    fillColor: '#10B981',
+                    fillOpacity: 0.02,
+                    dashArray: '5, 5'
+                }).addTo(map);
+            } else {
+                radarCircle.setLatLng(coordArray);
+                radarCircle.setRadius(radiusMeters);
+            }
+
+            // Pan map gracefully to center context
+            map.panTo(coordArray);
+
+            // Update bottom stats UI
+            document.getElementById('radar-lbl-center').innerText = `${userLocation.lat.toFixed(3)}, ${userLocation.lon.toFixed(3)}`;
+            document.getElementById('radar-lbl-radius').innerText = `${activeRadius} mi`;
+        }
+
+        // Get user Geolocation with permissions fallbacks
+        function requestUserLocation() {
+            updateGeoStatusIndicator('searching', 'Seeking Browser Location...');
+            logger.add("Requesting user geolocation parameters from window.navigator.geolocation...", "info");
+            
+            if ('geolocation' in navigator) {
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        userLocation.lat = position.coords.latitude;
+                        userLocation.lon = position.coords.longitude;
+                        locationAcquired = true;
+                        
+                        logger.add(`Geolocation successful. Center synchronized: ${userLocation.lat}, ${userLocation.lon}`, "success");
+                        updateGeoStatusIndicator('success', 'Location Detected');
+                        updateMapContext();
+                        showNotification('Location Found', `Successfully locked onto coordinate [${userLocation.lat.toFixed(4)}, ${userLocation.lon.toFixed(4)}]`, 'success');
+                        
+                        // Seed fields inside coordinates override modal
+                        document.getElementById('manual-lat').value = userLocation.lat.toFixed(5);
+                        document.getElementById('manual-lon').value = userLocation.lon.toFixed(5);
+                        
+                        // Run first air intelligence scan
+                        pollRadarSkies();
+                    },
+                    (error) => {
+                        console.warn('Geolocation failed: ' + error.message);
+                        locationAcquired = false;
+                        updateGeoStatusIndicator('error', 'Location Blocked (using default)');
+                        showNotification('GPS Blocked', 'Using default radar center (London). Click "Adjust Location" to select a preset or type in your coordinates!', 'warning');
+                        
+                        // Pre-populate defaults in manual modal anyway
+                        document.getElementById('manual-lat').value = userLocation.lat.toFixed(5);
+                        document.getElementById('manual-lon').value = userLocation.lon.toFixed(5);
+                        
+                        // Keep going with fallback coordinates
+                        pollRadarSkies();
+                    },
+                    { enableHighAccuracy: true, timeout: 8000 }
+                );
+            } else {
+                locationAcquired = false;
+                logger.add("Device does not support W3C Geolocation API. Applying fallback coordinates.", "warning");
+                updateGeoStatusIndicator('error', 'GPS not supported');
+                pollRadarSkies();
+            }
+        }
+
+        // Update indicators on top UI status bar
+        function updateGeoStatusIndicator(state, label) {
+            const ind = document.getElementById('geo-indicator');
+            const txt = document.getElementById('geo-text');
+
+            ind.className = 'w-2.5 h-2.5 rounded-full';
+            txt.innerText = label;
+
+            if (state === 'searching') {
+                ind.classList.add('bg-yellow-500', 'animate-ping');
+            } else if (state === 'success') {
+                ind.classList.add('bg-emerald-500');
+            } else if (state === 'error') {
+                ind.classList.add('bg-rose-500');
+            }
+        }
+
+        // Setup DOM event listeners
+        function setupEventListeners() {
+            // Tab Switchers
+            const btnAircraftTab = document.getElementById('tab-aircraft');
+            const btnLogsTab = document.getElementById('tab-logs');
+            const panelAircraft = document.getElementById('panel-aircraft-view');
+            const panelLogs = document.getElementById('panel-logs-view');
+
+            btnAircraftTab.addEventListener('click', () => {
+                btnAircraftTab.classList.replace('border-transparent', 'border-radar-glow');
+                btnAircraftTab.classList.replace('text-slate-400', 'text-white');
+                
+                btnLogsTab.classList.replace('border-radar-glow', 'border-transparent');
+                btnLogsTab.classList.replace('text-white', 'text-slate-400');
+                
+                panelAircraft.classList.remove('hidden');
+                panelLogs.classList.add('hidden');
+            });
+
+            btnLogsTab.addEventListener('click', () => {
+                btnLogsTab.classList.replace('border-transparent', 'border-radar-glow');
+                btnLogsTab.classList.replace('text-slate-400', 'text-white');
+                
+                btnAircraftTab.classList.replace('border-radar-glow', 'border-transparent');
+                btnAircraftTab.classList.replace('text-white', 'text-slate-400');
+                
+                panelLogs.classList.remove('hidden');
+                panelAircraft.classList.add('hidden');
+                
+                // Clear any attention-grabbing warning dots when logs view is opened
+                const dot = document.getElementById('log-warn-dot');
+                if (dot) dot.classList.add('hidden');
+            });
+
+            // Clean log memory
+            document.getElementById('btn-clear-logs').addEventListener('click', () => {
+                logger.clear();
+            });
+
+            // Copy logs to clipboard
+            document.getElementById('btn-copy-logs').addEventListener('click', () => {
+                const logText = logger.logs.map(l => `[${l.timestamp}] [${l.type}] ${l.message}`).join('\n');
+                
+                // Use robust legacy command to bypass iframe navigator.clipboard restrictions
+                const textArea = document.createElement("textarea");
+                textArea.value = logText;
+                textArea.style.position = "fixed"; // Prevents scrolling to bottom of page
+                textArea.style.opacity = "0";
+                document.body.appendChild(textArea);
+                textArea.focus();
+                textArea.select();
+                
+                try {
+                    const successful = document.execCommand('copy');
+                    if (successful) {
+                        showNotification('Logs Copied', 'Diagnostic logs successfully copied to clipboard.', 'success');
+                        logger.add("Diagnostics copied to clipboard.", "info");
+                    } else {
+                        throw new Error("execCommand returned false");
+                    }
+                } catch (err) {
+                    showNotification('Copy Failed', 'Failed to copy logs. Your browser might block clipboard access.', 'danger');
+                    logger.add("Clipboard copy failed due to browser security restrictions.", "error", err);
+                }
+                
+                document.body.removeChild(textArea);
+            });
+
+            // Dynamic Mock Injector Trigger
+            document.getElementById('btn-inject-demo').addEventListener('click', () => {
+                injectDemoTargets();
+            });
+
+            // Search Input listener
+            document.getElementById('search-input').addEventListener('input', (e) => {
+                currentFilters.search = e.target.value.trim().toLowerCase();
+                renderFilteredState();
+            });
+
+            // Radius Selection Update
+            document.getElementById('radius-select').addEventListener('change', (e) => {
+                activeRadius = parseInt(e.target.value, 10);
+                logger.add(`Recalibrating scanner sweep radius to: ${activeRadius} miles.`, "info");
+                updateMapContext();
+                pollRadarSkies();
+                showNotification('Radar recalibration', `Radius range expanded to ${activeRadius} miles.`, 'info');
+            });
+
+            // Manual Location Dialog triggers
+            const modal = document.getElementById('modal-coords');
+            document.getElementById('btn-manual-loc').addEventListener('click', () => {
+                modal.classList.remove('hidden');
+                modal.classList.add('flex');
+            });
+            
+            document.getElementById('btn-coords-cancel').addEventListener('click', () => {
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+            });
+
+            document.getElementById('btn-coords-save').addEventListener('click', () => {
+                const latInput = parseFloat(document.getElementById('manual-lat').value);
+                const lonInput = parseFloat(document.getElementById('manual-lon').value);
+
+                if (isNaN(latInput) || isNaN(lonInput) || latInput < -90 || latInput > 90 || lonInput < -180 || lonInput > 180) {
+                    showNotification('Input Error', 'Please specify legal coordinates (Latitude -90 to 90, Longitude -180 to 180)', 'danger');
+                    logger.add("Rejected illegal custom tracking coordinate inputs.", "warning");
+                    return;
+                }
+
+                userLocation.lat = latInput;
+                userLocation.lon = lonInput;
+                locationAcquired = true;
+                isSimulatingDemo = false; // Turn off demo context if center relocates
+                
+                updateGeoStatusIndicator('success', 'Custom Center Set');
+                updateMapContext();
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+
+                logger.add(`Relocated tactical station center to coordinate [${latInput}, ${lonInput}]`, "success");
+                showNotification('Radar Tuned', `Ground tracking center adjusted to [${userLocation.lat.toFixed(4)}, ${userLocation.lon.toFixed(4)}]`, 'success');
+                pollRadarSkies();
+            });
+
+            // Refresh Buttons & Timers
+            const btnRefresh = document.getElementById('btn-refresh');
+            const refreshIcon = document.getElementById('refresh-icon');
+            const timerTxt = document.getElementById('refresh-timer-txt');
+
+            btnRefresh.addEventListener('click', () => {
+                if (isAutoRefreshing) {
+                    isAutoRefreshing = false;
+                    btnRefresh.classList.replace('bg-radar-glow/10', 'bg-slate-800/80');
+                    btnRefresh.classList.replace('text-radar-glow', 'text-slate-400');
+                    btnRefresh.classList.replace('border-radar-glow/30', 'border-slate-700');
+                    timerTxt.innerText = "Auto Updates OFF";
+                    if (refreshTimeoutId) {
+                        clearTimeout(refreshTimeoutId);
+                        refreshTimeoutId = null;
+                    }
+                    logger.add("Automatic live telemetry scan loop paused.", "warning");
+                    showNotification('Updates Suspended', 'Automatic live telemetry scanning paused.', 'warning');
+                } else {
+                    isAutoRefreshing = true;
+                    btnRefresh.classList.replace('bg-slate-800/80', 'bg-radar-glow/10');
+                    btnRefresh.classList.replace('text-slate-400', 'text-radar-glow');
+                    btnRefresh.classList.replace('border-slate-700', 'border-radar-glow/30');
+                    timerTxt.innerText = "Auto Updates ON";
+                    logger.add("Automatic 10-second sweep timer re-engaged.", "info");
+                    showNotification('Updates Resumed', 'Engaging live scans every 10 seconds.', 'success');
+                    pollRadarSkies();
+                }
+            });
+
+            // Filtering Action Toggles
+            setupFilterToggle('toggle-mil', 'milOnly');
+            setupFilterToggle('toggle-emergency', 'emergencyOnly');
+            setupFilterToggle('toggle-ground', 'groundOnly');
+            setupFilterToggle('toggle-airborne', 'airborneOnly');
+
+            // Sort Toggle actions
+            setupSortSelector('sort-dist', 'dist');
+            setupSortSelector('sort-alt', 'alt');
+            setupSortSelector('sort-speed', 'speed');
+        }
+
+        // Setup filter helper state toggles
+        function setupFilterToggle(elementId, filterKey) {
+            const btn = document.getElementById(elementId);
+            btn.addEventListener('click', () => {
+                // If groundOnly is selected, disable airborneOnly
+                if (filterKey === 'groundOnly' && !currentFilters.groundOnly) {
+                    currentFilters.airborneOnly = false;
+                    document.getElementById('toggle-airborne').classList.remove('bg-radar-glow/20', 'border-radar-glow', 'text-white');
+                }
+                if (filterKey === 'airborneOnly' && !currentFilters.airborneOnly) {
+                    currentFilters.groundOnly = false;
+                    document.getElementById('toggle-ground').classList.remove('bg-radar-glow/20', 'border-radar-glow', 'text-white');
+                }
+
+                currentFilters[filterKey] = !currentFilters[filterKey];
+                
+                if (currentFilters[filterKey]) {
+                    btn.classList.add('bg-radar-glow/20', 'border-radar-glow', 'text-white');
+                } else {
+                    btn.classList.remove('bg-radar-glow/20', 'border-radar-glow', 'text-white');
+                }
+                logger.add(`Filter state updated: ${filterKey} set to ${currentFilters[filterKey]}`, "info");
+                renderFilteredState();
+            });
+        }
+
+        // Setup Sort button actions
+        function setupSortSelector(elementId, sortValue) {
+            const btn = document.getElementById(elementId);
+            btn.addEventListener('click', () => {
+                ['sort-dist', 'sort-alt', 'sort-speed'].forEach(id => {
+                    const el = document.getElementById(id);
+                    el.classList.remove('text-radar-glow', 'font-bold');
+                    el.classList.add('hover:text-slate-200');
+                });
+                btn.classList.add('text-radar-glow', 'font-bold');
+                currentFilters.sortBy = sortValue;
+                logger.add(`Sort parameter changed to focus: ${sortValue}`, "info");
+                renderFilteredState();
+            });
+        }
+
+        // Preset Coordinator utility
+        function setPresetCoords(lat, lon, label) {
+            document.getElementById('manual-lat').value = lat.toFixed(5);
+            document.getElementById('manual-lon').value = lon.toFixed(5);
+            logger.add(`Copied coordinate parameters for Preset: ${label}`, "info");
+            showNotification('Preset Loaded', `Coordinates loaded for ${label}. Click Apply to adjust radar view!`, 'info');
+        }
+
+        // Main background scanning process with custom robust proxy routing
+        async function pollRadarSkies() {
+            if (isSimulatingDemo) {
+                logger.add("Automatic update loop skipped. Mock target simulation mode is active.", "info");
+                if (isAutoRefreshing) {
+                    refreshTimeoutId = setTimeout(pollRadarSkies, autoRefreshInterval);
+                }
+                return;
+            }
+
+            if (refreshTimeoutId) clearTimeout(refreshTimeoutId);
+
+            const icon = document.getElementById('refresh-icon');
+            if (icon) icon.classList.add('animate-spin');
+
+            // Conversion from statute miles (used by standard users) to Nautical Miles
+            const nmRadius = Math.ceil(activeRadius * 0.868976);
+            
+            // Build direct target URL using the correct readsb API schema
+            const url = `https://api.airplanes.live/v2/point/${userLocation.lat}/${userLocation.lon}/${nmRadius}`;
+            
+            logger.add(`Initiating radar query sweep at [${userLocation.lat}, ${userLocation.lon}] with range limit: ${activeRadius} statute mi (${nmRadius} nm)...`, "info");
+
+            try {
+                // Fetch using our comprehensive, multi-layered proxy failover logic
+                const data = await fetchWithBackoff(url, 4, 1000);
+                
+                // Parse results safely
+                aircraftList = data.ac && Array.isArray(data.ac) ? data.ac : [];
+                logger.add(`Processing API handshake return data. Successfully extracted array: ${aircraftList.length} aircraft found in total payload.`, "success");
+                
+                // Process mathematical metric attributes (distance, heading)
+                aircraftList.forEach(plane => {
+                    // Inject calculated distance to user's ground tracker position
+                    plane.calculatedDistance = getHaversineDistance(
+                        userLocation.lat, 
+                        userLocation.lon, 
+                        plane.lat, 
+                        plane.lon
+                    );
+                    
+                    // Normalize standard status indicators
+                    plane.isMilitary = plane.dbFlags !== undefined ? (plane.dbFlags & 1) === 1 : false;
+                    plane.isEmergency = ['7500', '7600', '7700'].includes(plane.squawk) || plane.emergency === 'active' || plane.alert === 1;
+                });
+
+                if (aircraftList.length === 0) {
+                    logger.add("Airspace telemetry queried successfully, but 0 aircraft targets returned. This is extremely common in areas with low ADS-B receiver density or during quiet flight hours. Use 'Inject Demo Targets' in System Logs tab to verify map rendering!", "warning");
+                    document.getElementById('radar-lbl-status').innerText = 'Quiet Airspace';
+                    document.getElementById('radar-lbl-status').className = 'text-amber-500 font-bold';
+                } else {
+                    document.getElementById('radar-lbl-status').innerText = 'Nominal';
+                    document.getElementById('radar-lbl-status').className = 'text-emerald-400 font-bold';
+                }
+
+                // Display lists and plot targets onto interactive Leaflet map
+                renderFilteredState();
+                
+                // Update timestamps
+                const now = new Date();
+                document.getElementById('last-updated-tag').innerText = `Last updated: ${now.toLocaleTimeString()}`;
+
+            } catch (error) {
+                console.error("Critical API Failover Exhausted:", error);
+                document.getElementById('radar-lbl-status').innerText = 'Network Blocked';
+                document.getElementById('radar-lbl-status').className = 'text-rose-500 font-bold';
+                
+                logger.add("🚨 NETWORK INTERCEPT DETECTED: All external requests were killed. This is almost always caused by an AdBlocker (uBlock, AdBlock Plus) or Brave Shields blocking the URL because it contains the keyword 'adsb' or blocking 3rd-party iframe data. Please disable shields/adblockers for this page or use Demo Mode.", "error");
+
+                showNotification('Connection Blocked', 'Adblocker or Privacy Shields are likely blocking the connection. Please disable them and try again.', 'danger');
+            } finally {
+                if (icon) icon.classList.remove('animate-spin');
+
+                // Queue next scan if auto update is currently engaged
+                if (isAutoRefreshing) {
+                    refreshTimeoutId = setTimeout(pollRadarSkies, autoRefreshInterval);
+                }
+            }
+        }
+
+        // Multi-tier Fallback CORS Fetcher to systematically bypass sandbox origin constraints
+        async function fetchWithBackoff(url, retries = 4, delay = 1000) {
+            // An array of structural fetch closures tried progressively upon fail
+            const fetchStrategies = [
+                // Phase 0: Direct browser fetch (for unrestricted or standard local environments)
+                {
+                    name: "Direct API Fetch",
+                    fn: async (targetUrl) => {
+                        const response = await fetch(targetUrl, { headers: { 'Accept': 'application/json' }});
+                        if (!response.ok) throw new Error(`Direct HTTP ${response.status}`);
+                        return await response.json();
+                    }
+                },
+                // Phase 1: AllOrigins JSON Wrapper (extremely robust, wraps inside a custom payload to completely dodge null-origin CSP limits)
+                {
+                    name: "AllOrigins Wrapper Proxy",
+                    fn: async (targetUrl) => {
+                        // Prevent cached errors
+                        const uncachedUrl = `${targetUrl}&_=${Date.now()}`;
+                        const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(uncachedUrl)}`;
+                        const response = await fetch(proxyUrl);
+                        if (!response.ok) throw new Error(`AllOrigins HTTP ${response.status}`);
+                        const wrappedData = await response.json();
+                        if (!wrappedData.contents) throw new Error("AllOrigins wrapper contents were empty");
+                        return JSON.parse(wrappedData.contents);
+                    }
+                },
+                // Phase 2: ThingProxy Bridge
+                {
+                    name: "ThingProxy Bridge",
+                    fn: async (targetUrl) => {
+                        const proxyUrl = `https://thingproxy.freeboard.io/fetch/${targetUrl}`;
+                        const response = await fetch(proxyUrl);
+                        if (!response.ok) throw new Error(`ThingProxy HTTP ${response.status}`);
+                        return await response.json();
+                    }
+                },
+                // Phase 3: CodeTabs CORS Proxy
+                {
+                    name: "CodeTabs API Bridge",
+                    fn: async (targetUrl) => {
+                        const proxyUrl = `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`;
+                        const response = await fetch(proxyUrl);
+                        if (!response.ok) throw new Error(`CodeTabs HTTP ${response.status}`);
+                        return await response.json();
+                    }
+                }
+            ];
+
+            let lastAttemptError = null;
+
+            // Iterate sequentially through each network strategy
+            for (let strategyIndex = 0; strategyIndex < fetchStrategies.length; strategyIndex++) {
+                const strategy = fetchStrategies[strategyIndex];
+                logger.add(`[Strategy ${strategyIndex + 1}/${fetchStrategies.length}] Attempting handshake via ${strategy.name}...`, "info");
+                
+                // For each strategy, perform attempts with exponential backoff on retryable issues
+                for (let attempt = 0; attempt < 2; attempt++) {
+                    try {
+                        const startTime = Date.now();
+                        const data = await strategy.fn(url);
+                        const duration = Date.now() - startTime;
+                        
+                        logger.add(`Handshake SUCCESS via ${strategy.name} in ${duration}ms.`, "success");
+                        return data; // Success! Return immediately.
+                    } catch (err) {
+                        lastAttemptError = err;
+                        logger.add(`[Strategy ${strategyIndex + 1} - Attempt ${attempt + 1} Fail]: ${err.message}`, "warning");
+                        
+                        // Wait and implement backoff delay if retrying this specific method
+                        if (attempt < 1) {
+                            const sleepMs = delay * (attempt + 1);
+                            logger.add(`Backing off for ${sleepMs}ms before retrying ${strategy.name}...`, "info");
+                            await new Promise(resolve => setTimeout(resolve, sleepMs));
+                        }
+                    }
+                }
+            }
+            
+            throw lastAttemptError || new Error("All proxy pathways and direct fetches failed.");
+        }
+
+        // Diagnostic Utility: Injects synthetic aircraft targets circling the user coordinates
+        function injectDemoTargets() {
+            logger.add("Deactivating live telemetry query loops. Activating Mock Simulator mode...", "warning");
+            isSimulatingDemo = true;
+            
+            // Clear prior listings
+            aircraftList = [];
+            
+            const numTargets = 8;
+            logger.add(`Creating ${numTargets} synthetic aircraft vectors spaced circularly around Lat: ${userLocation.lat.toFixed(4)}, Lon: ${userLocation.lon.toFixed(4)}...`, "info");
+
+            const callsigns = ["BAW123", "UAL904", "MILITARY1", "N842PX", "DLH42B", "EZS99AC", "E-3D-ALERT", "N654SP"];
+            const planeTypes = ["B77W", "A320", "KC135", "C172", "A21N", "A319", "E3TF", "PA28"];
+            const squawks = ["2414", "1000", "7700", "1200", "3450", "0421", "7600", "1200"];
+            const registrees = ["G-YMMB", "N78013", "58-0012", "N842PX", "D-AIND", "HB-JZR", "ZH104", "N654SP"];
+
+            for (let i = 0; i < numTargets; i++) {
+                // Distribute distances randomly between 5 and 45 statute miles
+                const distanceMiles = 5 + Math.random() * 35;
+                const distanceKm = distanceMiles * 1.60934;
+                const bearingDeg = Math.random() * 360;
+                
+                // Earth math for projecting coordinate based on distance and bearing
+                const bearingRad = bearingDeg * Math.PI / 180;
+                const R = 6371; // Earth radius in km
+                const lat1Rad = userLocation.lat * Math.PI / 180;
+                const lon1Rad = userLocation.lon * Math.PI / 180;
+
+                const lat2Rad = Math.asin(
+                    Math.sin(lat1Rad) * Math.cos(distanceKm/R) +
+                    Math.cos(lat1Rad) * Math.sin(distanceKm/R) * Math.cos(bearingRad)
+                );
+                const lon2Rad = lon1Rad + Math.atan2(
+                    Math.sin(bearingRad) * Math.sin(distanceKm/R) * Math.cos(lat1Rad),
+                    Math.cos(distanceKm/R) - Math.sin(lat1Rad) * Math.sin(lat2Rad)
+                );
+
+                const mockLat = lat2Rad * 180 / Math.PI;
+                const mockLon = lon2Rad * 180 / Math.PI;
+
+                const isMilitary = i === 2 || i === 6;
+                const isEmergency = i === 2 || i === 6; // Squawk 7700 (military tanker or alert)
+
+                const mockPlane = {
+                    hex: (0x100000 + Math.floor(Math.random() * 0xEFFFFF)).toString(16),
+                    flight: callsigns[i],
+                    t: planeTypes[i],
+                    r: registrees[i],
+                    lat: mockLat,
+                    lon: mockLon,
+                    alt_baro: isEmergency && i === 6 ? 34000 : (Math.random() > 0.8 ? "ground" : Math.floor(25 + Math.random() * 350) * 100),
+                    gs: 80 + Math.random() * 450,
+                    track: Math.floor(Math.random() * 360),
+                    squawk: squawks[i],
+                    dbFlags: isMilitary ? 1 : 0,
+                    calculatedDistance: distanceMiles,
+                    isMilitary: isMilitary,
+                    isEmergency: isEmergency
+                };
+
+                aircraftList.push(mockPlane);
+                logger.add(`Injected Flight Vector: ${mockPlane.flight} (${mockPlane.t}) at ${mockPlane.calculatedDistance.toFixed(1)} miles. Emergency status: ${isEmergency}`, "info");
+            }
+
+            document.getElementById('radar-lbl-status').innerText = 'Simulation Mode';
+            document.getElementById('radar-lbl-status').className = 'text-indigo-400 font-bold';
+
+            renderFilteredState();
+            showNotification('Mock Airspace Loaded', `Successfully loaded ${numTargets} test aircraft vectors inside your current coordinates.`, 'success');
+
+            // Force visual tab back to plane panel for immediate interaction
+            document.getElementById('tab-aircraft').click();
+        }
+
+        // Apply filters & render aircraft list and markers
+        function renderFilteredState() {
+            // Filter array
+            let filtered = aircraftList.filter(plane => {
+                // Ignore planes with missing essential coordinate metrics
+                if (plane.lat === undefined || plane.lon === undefined) return false;
+
+                // Match searches
+                if (currentFilters.search) {
+                    const matchHex = (plane.hex || '').toLowerCase().includes(currentFilters.search);
+                    const matchFlight = (plane.flight || '').toLowerCase().includes(currentFilters.search);
+                    const matchType = (plane.t || '').toLowerCase().includes(currentFilters.search);
+                    const matchReg = (plane.r || '').toLowerCase().includes(currentFilters.search);
+                    if (!matchHex && !matchFlight && !matchType && !matchReg) return false;
+                }
+
+                // Filter flags
+                if (currentFilters.milOnly && !plane.isMilitary) return false;
+                if (currentFilters.emergencyOnly && !plane.isEmergency) return false;
+                if (currentFilters.groundOnly && plane.alt_baro !== "ground") return false;
+                if (currentFilters.airborneOnly && plane.alt_baro === "ground") return false;
+
+                // Filter strictly strictly within our requested radius in statute miles
+                if (plane.calculatedDistance > activeRadius) return false;
+
+                return true;
+            });
+
+            // Sort array
+            filtered.sort((a, b) => {
+                if (currentFilters.sortBy === 'dist') {
+                    return a.calculatedDistance - b.calculatedDistance;
+                } else if (currentFilters.sortBy === 'alt') {
+                    const altA = a.alt_baro === "ground" ? -1 : (parseInt(a.alt_baro) || 0);
+                    const altB = b.alt_baro === "ground" ? -1 : (parseInt(b.alt_baro) || 0);
+                    return altB - altA; // Highest altitude first
+                } else if (currentFilters.sortBy === 'speed') {
+                    const speedA = parseFloat(a.gs) || 0;
+                    const speedB = parseFloat(b.gs) || 0;
+                    return speedB - speedA; // Fastest first
+                }
+                return 0;
+            });
+
+            // Render stats bar on side panel
+            updateStatisticsDisplay(filtered);
+
+            // Re-render side panel HTML
+            renderListPanel(filtered);
+
+            // Sync visual targets mapped onto the Leaflet Canvas
+            syncMapMarkers(filtered);
+        }
+
+        // Helper calculations for visual stats indicators
+        function updateStatisticsDisplay(planes) {
+            document.getElementById('stat-total').innerText = planes.length;
+            
+            const milCount = planes.filter(p => p.isMilitary).length;
+            document.getElementById('stat-military').innerText = milCount;
+
+            const emergCount = planes.filter(p => p.isEmergency).length;
+            document.getElementById('stat-emergency').innerText = emergCount;
+
+            // Average airborne altitude
+            const airbornePlanes = planes.filter(p => p.alt_baro !== "ground" && parseInt(p.alt_baro) > 0);
+            if (airbornePlanes.length > 0) {
+                const totalAlt = airbornePlanes.reduce((acc, curr) => acc + parseInt(curr.alt_baro), 0);
+                const avgAlt = Math.round(totalAlt / airbornePlanes.length);
+                document.getElementById('stat-avg-alt').innerText = `${avgAlt.toLocaleString()}ft`;
+            } else {
+                document.getElementById('stat-avg-alt').innerText = '--';
+            }
+        }
+
+        // Generate side list cards HTML
+        function renderListPanel(planes) {
+            const listContainer = document.getElementById('aircraft-list');
+            
+            if (planes.length === 0) {
+                listContainer.innerHTML = `
+                    <div class="py-16 px-4 text-center space-y-2">
+                        <svg class="w-10 h-10 text-slate-600 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                        <p class="text-sm font-semibold text-slate-300">No Aircraft Located</p>
+                        <p class="text-xs text-slate-500">Try zooming out the scanner radius or adjustment controls to active airspaces.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            let htmlString = '';
+            planes.forEach(plane => {
+                const callsign = (plane.flight || 'N/A').trim();
+                const typeCode = plane.t || 'Unknown';
+                const reg = plane.r || 'No Reg';
+                const altitude = plane.alt_baro === "ground" ? "GROUND" : `${(plane.alt_baro || 0).toLocaleString()} ft`;
+                const speed = plane.gs ? `${Math.round(plane.gs)} kts` : 'N/A';
+                const heading = plane.track !== undefined && plane.track !== null ? `${Math.round(plane.track)}°` : 'N/A';
+                const distStr = `${plane.calculatedDistance.toFixed(1)} miles`;
+                const hexId = plane.hex ? plane.hex.toUpperCase() : 'N/A';
+
+                // Badges parsing
+                let badgeHTML = '';
+                if (plane.isMilitary) {
+                    badgeHTML += `<span class="bg-sky-500/15 text-sky-400 border border-sky-500/30 text-[9px] px-1.5 py-0.5 rounded font-bold">MIL</span>`;
+                }
+                if (plane.isEmergency) {
+                    badgeHTML += `<span class="bg-red-500/25 text-red-400 border border-red-500/40 text-[9px] px-1.5 py-0.5 rounded font-bold animate-pulse">EMERGENCY (${plane.squawk || 'ALERT'})</span>`;
+                } else if (plane.squawk) {
+                    badgeHTML += `<span class="bg-slate-800 text-slate-400 text-[9px] px-1.5 py-0.5 rounded font-mono">SQ: ${plane.squawk}</span>`;
+                }
+
+                const isSelected = activeSelectedHex === plane.hex;
+                const cardClass = isSelected 
+                    ? 'p-3.5 bg-radar-glow/10 border-l-4 border-radar-glow text-white transition-all cursor-pointer'
+                    : 'p-3.5 hover:bg-slate-900/50 border-l-4 border-transparent transition-all cursor-pointer';
+
+                htmlString += `
+                    <div class="${cardClass}" onclick="focusOnPlane('${plane.hex}', true)">
+                        <div class="flex items-center justify-between gap-2 mb-1.5">
+                            <div class="flex items-center gap-2">
+                                <span class="text-sm font-bold text-slate-100 uppercase tracking-wide mono">${callsign}</span>
+                                <span class="text-xs text-slate-400 font-mono text-[10px] bg-slate-800 px-1 rounded">${hexId}</span>
+                            </div>
+                            <div class="flex items-center gap-1.5">
+                                ${badgeHTML}
+                                <span class="text-xs font-semibold text-radar-glow bg-radar-glow/5 px-2 py-0.5 rounded-full border border-radar-glow/20">${distStr}</span>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-4 gap-2 text-xs text-slate-400">
+                            <div>
+                                <span class="block text-[10px] text-slate-500 uppercase tracking-tight">Type / Reg</span>
+                                <strong class="text-slate-300 block truncate">${typeCode} <span class="text-[10px] text-slate-400 font-normal">(${reg})</span></strong>
+                            </div>
+                            <div>
+                                <span class="block text-[10px] text-slate-500 uppercase tracking-tight">Altitude</span>
+                                <strong class="${plane.alt_baro === "ground" ? "text-amber-500" : "text-emerald-400"} block font-medium truncate">${altitude}</strong>
+                            </div>
+                            <div>
+                                <span class="block text-[10px] text-slate-500 uppercase tracking-tight">Speed</span>
+                                <strong class="text-slate-300 block truncate">${speed}</strong>
+                            </div>
+                            <div>
+                                <span class="block text-[10px] text-slate-500 uppercase tracking-tight">Heading</span>
+                                <strong class="text-slate-300 block truncate">${heading}</strong>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            listContainer.innerHTML = htmlString;
+        }
+
+        let activeSelectedHex = null;
+
+        // Visual Marker Mapping synchronize routine
+        function syncMapMarkers(activePlanes) {
+            const currentHexCodes = new Set(activePlanes.map(p => p.hex));
+
+            // 1. Remove old markers for planes no longer reporting inside range
+            Object.keys(mapMarkers).forEach(hex => {
+                if (!currentHexCodes.has(hex)) {
+                    map.removeLayer(mapMarkers[hex]);
+                    delete mapMarkers[hex];
+                }
+            });
+
+            // 2. Add or update current markers
+            activePlanes.forEach(plane => {
+                if (plane.lat === undefined || plane.lon === undefined) return;
+                const coord = [plane.lat, plane.lon];
+                const isMilitary = plane.isMilitary;
+                const isEmergency = plane.isEmergency;
+
+                // Configure custom marker color themes
+                let colorTheme = '#10B981'; // Green active tracking
+                if (isEmergency) colorTheme = '#EF4444'; // Red emergency alert
+                else if (plane.alt_baro === "ground") colorTheme = '#F59E0B'; // Amber ground
+
+                const planeIconHtml = getPlaneIconSVG(plane.track, colorTheme, isMilitary);
+                
+                const customDivIcon = L.divIcon({
+                    className: 'custom-plane-marker',
+                    html: planeIconHtml,
+                    iconSize: [40, 40],
+                    iconAnchor: [20, 20],
+                    popupAnchor: [0, -15]
+                });
+
+                // Popup content string
+                const popupContent = `
+                    <div class="text-xs p-1.5 space-y-2 min-w-[200px]">
+                        <div class="flex items-center justify-between border-b border-slate-700 pb-1.5">
+                            <h4 class="font-bold text-sm text-white mono">${plane.flight ? plane.flight.trim() : 'N/A'}</h4>
+                            <span class="text-[9px] bg-slate-800 text-slate-400 px-1 py-0.5 rounded font-mono">${plane.hex ? plane.hex.toUpperCase() : ''}</span>
+                        </div>
+                        <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-slate-300">
+                            <div>Type: <strong class="text-white">${plane.t || 'Unknown'}</strong></div>
+                            <div>Reg: <strong class="text-white">${plane.r || 'N/A'}</strong></div>
+                            <div>Alt: <strong class="text-emerald-400">${plane.alt_baro === 'ground' ? 'Ground' : (plane.alt_baro || 0).toLocaleString() + 'ft'}</strong></div>
+                            <div>Speed: <strong class="text-white">${plane.gs ? Math.round(plane.gs) + ' kts' : 'N/A'}</strong></div>
+                            <div>Track: <strong class="text-white">${plane.track !== undefined && plane.track !== null ? Math.round(plane.track) + '°' : 'N/A'}</strong></div>
+                            <div>Dist: <strong class="text-radar-glow">${plane.calculatedDistance.toFixed(1)} mi</strong></div>
+                        </div>
+                        ${plane.squawk ? `<div class="text-[10px] pt-1 border-t border-slate-700/50 text-slate-400">Squawk: <span class="font-mono text-slate-200">${plane.squawk}</span></div>` : ''}
+                    </div>
+                `;
+
+                if (mapMarkers[plane.hex]) {
+                    // Update positional lat/lon and bearing icons gracefully
+                    const existingMarker = mapMarkers[plane.hex];
+                    existingMarker.setLatLng(coord);
+                    existingMarker.setIcon(customDivIcon);
+                    
+                    // Update active popups if already visible on screen
+                    const popup = existingMarker.getPopup();
+                    if (popup && popup.isOpen()) {
+                        existingMarker.setPopupContent(popupContent);
+                    } else {
+                        existingMarker.bindPopup(popupContent);
+                    }
+                } else {
+                    // Instantiation loop of new target
+                    const marker = L.marker(coord, { icon: customDivIcon }).addTo(map);
+                    marker.bindPopup(popupContent);
+                    
+                    // Bind map element clicks to side detailed selection syncing
+                    marker.on('click', () => {
+                        focusOnPlane(plane.hex, false);
+                    });
+
+                    mapMarkers[plane.hex] = marker;
+                }
+            });
+        }
+
+        // Detailed targeting visual focus helper
+        function focusOnPlane(hex, panMap = true) {
+            activeSelectedHex = hex;
+            
+            // Re-render only list styling boundaries
+            const planes = aircraftList.filter(plane => {
+                if (plane.lat === undefined || plane.lon === undefined) return false;
+                if (currentFilters.milOnly && !plane.isMilitary) return false;
+                if (currentFilters.emergencyOnly && !plane.isEmergency) return false;
+                if (currentFilters.groundOnly && plane.alt_baro !== "ground") return false;
+                if (currentFilters.airborneOnly && plane.alt_baro === "ground") return false;
+                if (plane.calculatedDistance > activeRadius) return false;
+                return true;
+            });
+            renderListPanel(planes);
+
+            // Fetch specific marker instance
+            const marker = mapMarkers[hex];
+            if (marker) {
+                if (panMap) {
+                    map.setView(marker.getLatLng(), 11, { animate: true });
+                }
+                marker.openPopup();
+            }
+        }
+
+        // Mathematical Haversine standard formula for perfect distance calculations (Statute Miles)
+        function getHaversineDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371; // Earth Radius in Kilometers
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            
+            const a = 
+                Math.sin(dLat/2) * Math.sin(dLat/2) +
+                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
+                
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            const d = R * c; // Distance in km
+            
+            return d * 0.621371; // Return Statute Miles conversion
+        }
+
+        // Custom responsive notification toast module
+        function showNotification(title, message, type = 'info') {
+            const container = document.getElementById('notification-container');
+            const toast = document.createElement('div');
+            
+            let typeClasses = 'bg-slate-900 text-slate-100 border-slate-700';
+            let iconSvg = '';
+
+            if (type === 'success') {
+                typeClasses = 'bg-slate-900 border-emerald-500/40 text-emerald-100';
+                iconSvg = `<svg class="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>`;
+            } else if (type === 'warning') {
+                typeClasses = 'bg-slate-900 border-amber-500/40 text-amber-100';
+                iconSvg = `<svg class="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>`;
+            } else if (type === 'danger') {
+                typeClasses = 'bg-slate-900 border-rose-500/40 text-rose-100';
+                iconSvg = `<svg class="w-5 h-5 text-rose-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>`;
+            } else {
+                typeClasses = 'bg-slate-900 border-blue-500/40 text-blue-100';
+                iconSvg = `<svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>`;
+            }
+
+            toast.className = `p-4 border rounded-xl shadow-2xl flex items-start space-x-3 transition-all transform duration-300 translate-y-2 opacity-0 pointer-events-auto backdrop-blur-md ${typeClasses}`;
+            toast.innerHTML = `
+                <div class="flex-shrink-0 pt-0.5">${iconSvg}</div>
+                <div class="flex-grow">
+                    <h5 class="text-xs font-bold uppercase tracking-wider text-white">${title}</h5>
+                    <p class="text-xs text-slate-400 mt-1">${message}</p>
+                </div>
+                <button class="flex-shrink-0 text-slate-500 hover:text-white transition-all text-sm font-semibold" onclick="this.parentElement.remove()">✕</button>
+            `;
+
+            container.appendChild(toast);
+            
+            // Trigger animation in
+            setTimeout(() => {
+                toast.classList.remove('translate-y-2', 'opacity-0');
+            }, 50);
+
+            // Slide-out and destroy automatically after 5 seconds
+            setTimeout(() => {
+                toast.classList.add('opacity-0', 'scale-95');
+                setTimeout(() => {
+                    toast.remove();
+                }, 300);
+            }, 5000);
+        }
+    </script>
+</body>
+</html>
