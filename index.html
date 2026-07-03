@@ -109,7 +109,13 @@
             display: none !important;
         }
         
-        /* Dark theme for map scale */
+        /* Dark Theme overrides for Leaflet Zoom Controls */
+        .leaflet-bar {
+            border: 1px solid #334155 !important; /* slate-700 */
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5) !important;
+            border-radius: 6px !important;
+            overflow: hidden;
+        }
         .leaflet-control-scale-line {
             background: rgba(15, 23, 42, 0.75) !important;
             color: #94A3B8 !important;
@@ -189,6 +195,12 @@
                 </select>
             </div>
 
+            <!-- Toggle Panel Button -->
+            <button id="btn-toggle-sidebar" class="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7"/></svg>
+                <span id="btn-toggle-sidebar-text">Show Panel</span>
+            </button>
+
             <!-- Custom Map Zoom Controls -->
             <div class="flex items-center bg-slate-800/80 border border-slate-700 rounded-lg overflow-hidden">
                 <button id="btn-zoom-out" class="px-3.5 py-1 text-slate-300 hover:text-white hover:bg-slate-700 border-r border-slate-700 font-bold text-lg transition-colors focus:outline-none" title="Zoom Out">−</button>
@@ -216,7 +228,7 @@
     <main class="flex-grow grid grid-cols-1 lg:grid-cols-12 gap-0 overflow-hidden relative">
         
         <!-- Sidebar / Aircraft List (Grid 4) -->
-        <section class="lg:col-span-5 xl:col-span-4 bg-radar-base border-r border-radar-border flex flex-col h-[45vh] lg:h-auto overflow-hidden order-2 lg:order-1 z-50">
+        <section id="sidebar-panel" class="hidden lg:col-span-5 xl:col-span-4 bg-radar-base border-r border-radar-border flex flex-col h-[45vh] lg:h-auto overflow-hidden order-2 lg:order-1 z-50">
             
             <!-- Tab Selection Bar -->
             <div class="flex border-b border-radar-border bg-slate-900/60">
@@ -338,7 +350,7 @@
         </section>
 
         <!-- Main Map Area (Grid 8) -->
-        <section id="map-container" class="lg:col-span-7 xl:col-span-8 h-[55vh] lg:h-auto relative flex flex-col order-1 lg:order-2 overflow-hidden bg-radar-dark">
+        <section id="map-container" class="lg:col-span-12 xl:col-span-12 h-full lg:h-auto relative flex flex-col order-1 lg:order-2 overflow-hidden bg-radar-dark">
             <!-- Leaflet Map Container -->
             <div id="map" class="w-full flex-grow z-10"></div>
             
@@ -826,6 +838,37 @@
                 if (map) map.zoomOut();
             });
 
+            // Sidebar Toggle Logic
+            let isSidebarVisible = false;
+            const btnToggleSidebar = document.getElementById('btn-toggle-sidebar');
+            const sidebarPanel = document.getElementById('sidebar-panel');
+            const mapContainer = document.getElementById('map-container');
+            const toggleText = document.getElementById('btn-toggle-sidebar-text');
+
+            btnToggleSidebar.addEventListener('click', () => {
+                isSidebarVisible = !isSidebarVisible;
+                if (isSidebarVisible) {
+                    // Show Panel: Split screen view
+                    sidebarPanel.classList.remove('hidden');
+                    sidebarPanel.classList.add('flex');
+                    mapContainer.classList.remove('lg:col-span-12', 'xl:col-span-12', 'h-full');
+                    mapContainer.classList.add('lg:col-span-7', 'xl:col-span-8', 'h-[55vh]');
+                    toggleText.innerText = 'Hide Panel';
+                    btnToggleSidebar.classList.add('bg-slate-700', 'text-white');
+                } else {
+                    // Hide Panel: Full screen map view
+                    sidebarPanel.classList.add('hidden');
+                    sidebarPanel.classList.remove('flex');
+                    mapContainer.classList.remove('lg:col-span-7', 'xl:col-span-8', 'h-[55vh]');
+                    mapContainer.classList.add('lg:col-span-12', 'xl:col-span-12', 'h-full');
+                    toggleText.innerText = 'Show Panel';
+                    btnToggleSidebar.classList.remove('bg-slate-700', 'text-white');
+                }
+                
+                // Important: Trigger Leaflet to recalculate its viewport constraints when the container resizes
+                setTimeout(() => { if (map) map.invalidateSize(); }, 300);
+            });
+
             // Manual Location Dialog triggers
             const modal = document.getElementById('modal-coords');
             document.getElementById('btn-manual-loc').addEventListener('click', () => {
@@ -842,7 +885,7 @@
                 const latInput = parseFloat(document.getElementById('manual-lat').value);
                 const lonInput = parseFloat(document.getElementById('manual-lon').value);
 
-                if (isNaN(latInput) || isNaN(lonInput) || latInput < -90 || latInput > 90 || lonInput < -180 || lonInput > 180) {
+                if (isNaN(latInput) || i/NaN(lonInput) || latInput < -90 || latInput > 90 || lonInput < -180 || lonInput > 180) {
                     showNotification('Input Error', 'Please specify legal coordinates (Latitude -90 to 90, Longitude -180 to 180)', 'danger');
                     logger.add("Rejected illegal custom tracking coordinate inputs.", "warning");
                     return;
@@ -1423,8 +1466,10 @@
                 // Calculate Elite Stalk Parallax offset
                 const altitude = plane.alt_baro === "ground" ? 0 : (parseInt(plane.alt_baro) || 0);
                 
-                // Scale visual height for the stalk 
-                const stalkHeight = Math.min(Math.max(altitude / 150, 0), 180);
+                // Non-linear Square-Root scaling curve:
+                // Spreads out lower altitude stalks (e.g., 500ft is ~20px, 1000ft is ~28px instead of tiny slivers),
+                // while high altitude targets are compressed beautifully within the 180px limit.
+                const stalkHeight = plane.alt_baro === "ground" ? 0 : Math.min(0.9 * Math.sqrt(altitude), 180);
 
                 const planeIconHtml = get2_5DMarkerHTML(plane, colorTheme, stalkHeight);
                 
