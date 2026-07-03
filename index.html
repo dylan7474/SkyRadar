@@ -381,22 +381,23 @@
                     <button onclick="hideHUD()" class="text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-full w-6 h-6 flex items-center justify-center transition-colors" aria-label="Close cockpit view">✕</button>
                 </div>
                 <div class="relative bg-gradient-to-b from-sky-950 via-slate-950 to-emerald-950">
-                    <canvas id="cockpit-canvas" width="680" height="360" class="block w-full h-[180px]" aria-label="Pilot-relative map showing nearby traffic"></canvas>
+                    <canvas id="cockpit-canvas" width="680" height="400" class="block w-full h-[200px]" aria-label="Pilot-relative HUD showing nearby traffic with altitude separation and range cues"></canvas>
                     <div class="absolute left-3 bottom-2 right-3 flex items-center justify-between text-[10px] mono text-slate-300 pointer-events-none">
                         <span id="cockpit-heading" class="bg-slate-950/75 border border-slate-700 rounded px-1.5 py-0.5">HDG --°</span>
                         <span id="cockpit-range" class="bg-slate-950/75 border border-slate-700 rounded px-1.5 py-0.5">RANGE 15 MI</span>
+                        <span id="cockpit-altitude" class="bg-slate-950/75 border border-slate-700 rounded px-1.5 py-0.5">ALT -- FT</span>
                     </div>
                 </div>
                 <div class="border-t border-radar-border bg-slate-950 px-3 py-3">
                     <div class="mb-2 flex items-center justify-between">
-                        <span class="text-[10px] font-bold uppercase tracking-[0.16em] text-radar-glow">Live Flight Instruments</span>
-                        <span id="instrument-source-note" class="text-[9px] text-slate-500 mono">ADS-B derived</span>
+                        <span class="text-[10px] font-bold uppercase tracking-[0.16em] text-radar-glow">Primary Flight Display</span>
+                        <span id="instrument-source-note" class="text-[9px] text-slate-500 mono">ADS-B simulated</span>
                     </div>
                     <canvas id="cockpit-instruments" width="780" height="520" class="block w-full h-[260px]" aria-label="Six pack flight instruments based on selected aircraft telemetry"></canvas>
-                    <p class="mt-2 text-[9px] leading-snug text-slate-500">ASI uses ADS-B ground speed as an airspeed proxy. Attitude is estimated from reported climb/descent and heading changes because ADS-B usually does not broadcast full attitude telemetry. The flight-path gauge is calculated from ground speed and vertical-rate data.</p>
+                    <p class="mt-2 text-[9px] leading-snug text-slate-500">HUD traffic includes relative bearing, distance, and altitude separation when reported. Airspeed, attitude, and flight-path cues are estimated from ADS-B ground speed, heading, altitude, and vertical-rate data, so use this as a situational display only.</p>
                 </div>
                 <div id="cockpit-traffic-list" class="px-3 py-2 text-[10px] text-slate-400 mono border-t border-radar-border bg-slate-950/90">
-                    Nearby traffic will appear here.
+                    Nearest traffic will appear here with relative bearing, altitude separation, and closure cues.
                 </div>
             </div>
 
@@ -1500,17 +1501,22 @@
             if (!cockpit || !canvas || selectedPlane.lat === undefined || selectedPlane.lon === undefined) return;
 
             const heading = selectedPlane.track !== undefined && selectedPlane.track !== null ? Math.round(selectedPlane.track) : 0;
+            const altitude = getPlaneAltitudeFeet(selectedPlane);
             const callsign = selectedPlane.flight ? selectedPlane.flight.trim() : (selectedPlane.hex ? selectedPlane.hex.toUpperCase() : 'UNKNOWN');
             document.getElementById('cockpit-subtitle').innerText = `${callsign} pilot-relative traffic picture`;
             document.getElementById('cockpit-heading').innerText = `HDG ${String(heading).padStart(3, '0')}°`;
             document.getElementById('cockpit-range').innerText = `RANGE ${cockpitRangeMiles} MI`;
+            document.getElementById('cockpit-altitude').innerText = `ALT ${Math.round(altitude).toLocaleString()} FT`;
 
             const traffic = aircraftList
                 .filter(plane => plane.hex !== selectedPlane.hex && plane.lat !== undefined && plane.lon !== undefined)
                 .map(plane => {
                     const distance = getHaversineDistance(selectedPlane.lat, selectedPlane.lon, plane.lat, plane.lon);
                     const bearing = getBearingDegrees(selectedPlane.lat, selectedPlane.lon, plane.lat, plane.lon);
-                    return { plane, distance, bearing };
+                    const relativeBearing = normalizeAngle(bearing - heading);
+                    const altitudeDelta = getPlaneAltitudeFeet(plane) - altitude;
+                    const closureRate = estimateClosureRate(selectedPlane, plane, bearing);
+                    return { plane, distance, bearing, relativeBearing, altitudeDelta, closureRate };
                 })
                 .filter(item => item.distance <= cockpitRangeMiles)
                 .sort((a, b) => a.distance - b.distance);
@@ -1521,76 +1527,160 @@
             cockpit.classList.remove('hidden');
         }
 
+        function estimateClosureRate(ownship, trafficPlane, bearingToTraffic) {
+            const ownSpeed = Number.parseFloat(ownship.gs ?? 0) || 0;
+            const trafficSpeed = Number.parseFloat(trafficPlane.gs ?? 0) || 0;
+            const ownTrack = Number.parseFloat(ownship.track ?? ownship.true_heading ?? ownship.mag_heading ?? 0) || 0;
+            const trafficTrack = Number.parseFloat(trafficPlane.track ?? trafficPlane.true_heading ?? trafficPlane.mag_heading ?? bearingToTraffic) || bearingToTraffic;
+            const ownTowardTraffic = ownSpeed * Math.cos(normalizeAngle(ownTrack - bearingToTraffic) * Math.PI / 180);
+            const trafficTowardOwnship = trafficSpeed * Math.cos(normalizeAngle(trafficTrack - normalizeAngle(bearingToTraffic + 180)) * Math.PI / 180);
+            return ownTowardTraffic + trafficTowardOwnship;
+        }
+
         function drawCockpitCanvas(canvas, selectedPlane, traffic, heading) {
             const ctx = canvas.getContext('2d');
             const width = canvas.width;
             const height = canvas.height;
             ctx.clearRect(0, 0, width, height);
 
-            const horizonY = Math.round(height * 0.45);
+            const attitude = getEstimatedAttitude(selectedPlane);
+            const horizonY = Math.round(height * 0.48 + attitude.pitch * 2.4);
             const skyGradient = ctx.createLinearGradient(0, 0, 0, horizonY);
-            skyGradient.addColorStop(0, '#082f49');
-            skyGradient.addColorStop(1, '#0f172a');
+            skyGradient.addColorStop(0, '#075985');
+            skyGradient.addColorStop(0.7, '#0f172a');
+            skyGradient.addColorStop(1, '#1e293b');
             ctx.fillStyle = skyGradient;
             ctx.fillRect(0, 0, width, horizonY);
             const groundGradient = ctx.createLinearGradient(0, horizonY, 0, height);
-            groundGradient.addColorStop(0, '#064e3b');
+            groundGradient.addColorStop(0, '#0f766e');
+            groundGradient.addColorStop(0.35, '#064e3b');
             groundGradient.addColorStop(1, '#020617');
             ctx.fillStyle = groundGradient;
             ctx.fillRect(0, horizonY, width, height);
 
-            ctx.strokeStyle = 'rgba(16, 185, 129, 0.25)';
-            ctx.lineWidth = 1;
-            for (let i = 1; i <= 3; i++) {
-                const y = horizonY + i * 48;
-                ctx.beginPath();
-                ctx.ellipse(width / 2, y, i * 88, 18, 0, 0, Math.PI * 2);
-                ctx.stroke();
-            }
-            ctx.beginPath();
-            ctx.moveTo(width / 2, horizonY);
-            ctx.lineTo(width / 2, height - 22);
-            ctx.stroke();
+            drawHudPitchLadder(ctx, width, height, horizonY, attitude);
+            drawHudCompassTape(ctx, width, heading);
+            drawHudTrafficScope(ctx, width, height);
 
-            ctx.fillStyle = '#10B981';
-            ctx.beginPath();
-            ctx.moveTo(width / 2, height - 56);
-            ctx.lineTo(width / 2 - 15, height - 22);
-            ctx.lineTo(width / 2 + 15, height - 22);
-            ctx.closePath();
-            ctx.fill();
+            traffic.forEach(item => drawHudTraffic(ctx, width, height, item, heading));
 
-            traffic.forEach(({ plane, distance, bearing }) => {
-                const relativeBearing = normalizeAngle(bearing - heading);
-                if (Math.abs(relativeBearing) > 95) return;
-                const x = width / 2 + (relativeBearing / 95) * (width * 0.43);
-                const depth = Math.max(0, 1 - distance / cockpitRangeMiles);
-                const y = horizonY + 18 + (1 - depth) * (height - horizonY - 88);
-                const size = 7 + depth * 8;
-                const color = plane.isEmergency ? '#EF4444' : (plane.isMilitary ? '#38BDF8' : '#F59E0B');
-
-                ctx.save();
-                ctx.translate(x, y);
-                ctx.rotate(((plane.track || heading) - heading) * Math.PI / 180);
-                ctx.fillStyle = color;
-                ctx.beginPath();
-                ctx.moveTo(0, -size);
-                ctx.lineTo(size * 0.6, size);
-                ctx.lineTo(0, size * 0.45);
-                ctx.lineTo(-size * 0.6, size);
-                ctx.closePath();
-                ctx.fill();
-                ctx.restore();
-
-                ctx.fillStyle = color;
-                ctx.font = '20px JetBrains Mono, monospace';
-                ctx.fillText((plane.flight || plane.hex || 'UNK').trim().slice(0, 8), x + 10, y - 8);
-                ctx.fillStyle = '#cbd5e1';
-                ctx.font = '16px JetBrains Mono, monospace';
-                ctx.fillText(`${distance.toFixed(1)}mi`, x + 10, y + 12);
-            });
+            drawOwnshipSymbol(ctx, width, height);
         }
 
+        function drawHudPitchLadder(ctx, width, height, horizonY, attitude) {
+            ctx.save();
+            ctx.translate(width / 2, horizonY);
+            ctx.rotate(-attitude.bank * Math.PI / 180);
+            ctx.strokeStyle = 'rgba(187, 247, 208, 0.65)';
+            ctx.fillStyle = 'rgba(187, 247, 208, 0.9)';
+            ctx.lineWidth = 2;
+            ctx.font = '13px JetBrains Mono, monospace';
+            ctx.textAlign = 'center';
+            for (let pitch = -20; pitch <= 20; pitch += 5) {
+                const y = -pitch * 6 - attitude.pitch * 2.8;
+                if (Math.abs(y) > height * 0.42) continue;
+                const span = pitch === 0 ? 150 : 86;
+                ctx.beginPath();
+                ctx.moveTo(-span, y);
+                ctx.lineTo(-24, y);
+                ctx.moveTo(24, y);
+                ctx.lineTo(span, y);
+                ctx.stroke();
+                if (pitch !== 0) {
+                    ctx.fillText(String(Math.abs(pitch)), -span - 18, y + 4);
+                    ctx.fillText(String(Math.abs(pitch)), span + 18, y + 4);
+                }
+            }
+            ctx.restore();
+        }
+
+        function drawHudCompassTape(ctx, width, heading) {
+            ctx.fillStyle = 'rgba(2, 6, 23, 0.62)';
+            ctx.fillRect(width / 2 - 170, 12, 340, 34);
+            ctx.strokeStyle = 'rgba(16, 185, 129, 0.8)';
+            ctx.strokeRect(width / 2 - 170, 12, 340, 34);
+            ctx.fillStyle = '#bbf7d0';
+            ctx.font = '13px JetBrains Mono, monospace';
+            ctx.textAlign = 'center';
+            for (let offset = -60; offset <= 60; offset += 15) {
+                const hdg = Math.round((heading + offset + 360) % 360);
+                const x = width / 2 + offset * 2.35;
+                ctx.fillText(hdg === 0 ? '360' : String(hdg).padStart(3, '0'), x, 34);
+            }
+            ctx.fillStyle = '#10b981';
+            ctx.beginPath();
+            ctx.moveTo(width / 2, 48);
+            ctx.lineTo(width / 2 - 7, 58);
+            ctx.lineTo(width / 2 + 7, 58);
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        function drawHudTrafficScope(ctx, width, height) {
+            const scopeY = height - 86;
+            ctx.strokeStyle = 'rgba(16, 185, 129, 0.28)';
+            ctx.lineWidth = 1;
+            [0.33, 0.66, 1].forEach((scale, index) => {
+                ctx.beginPath();
+                ctx.ellipse(width / 2, scopeY, 230 * scale, 42 * scale, 0, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.fillStyle = 'rgba(203, 213, 225, 0.8)';
+                ctx.font = '10px JetBrains Mono, monospace';
+                ctx.textAlign = 'left';
+                ctx.fillText(`${Math.round(cockpitRangeMiles * scale)} MI`, width / 2 + 236 * scale, scopeY + 4 + index * 2);
+            });
+            ctx.beginPath();
+            ctx.moveTo(width / 2, 64);
+            ctx.lineTo(width / 2, height - 32);
+            ctx.stroke();
+        }
+
+        function drawOwnshipSymbol(ctx, width, height) {
+            const y = height - 66;
+            ctx.strokeStyle = '#34d399';
+            ctx.fillStyle = '#10b981';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(width / 2, y - 25);
+            ctx.lineTo(width / 2 - 18, y + 16);
+            ctx.lineTo(width / 2, y + 7);
+            ctx.lineTo(width / 2 + 18, y + 16);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+        }
+
+        function drawHudTraffic(ctx, width, height, item, heading) {
+            const { plane, distance, relativeBearing, altitudeDelta, closureRate } = item;
+            if (Math.abs(relativeBearing) > 100) return;
+            const depth = Math.max(0, 1 - distance / cockpitRangeMiles);
+            const x = width / 2 + (relativeBearing / 100) * (width * 0.44);
+            const y = height - 86 - depth * 178 - Math.max(-44, Math.min(44, altitudeDelta / 120));
+            const size = 9 + depth * 8;
+            const color = plane.isEmergency ? '#ef4444' : (Math.abs(altitudeDelta) < 1000 && distance < 5 ? '#facc15' : (plane.isMilitary ? '#38bdf8' : '#f59e0b'));
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.rotate(normalizeAngle((plane.track || heading) - heading) * Math.PI / 180);
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.moveTo(0, -size);
+            ctx.lineTo(size * 0.7, size);
+            ctx.lineTo(0, size * 0.45);
+            ctx.lineTo(-size * 0.7, size);
+            ctx.closePath();
+            ctx.fill();
+            ctx.restore();
+
+            const altText = `${altitudeDelta >= 0 ? '+' : '-'}${Math.round(Math.abs(altitudeDelta) / 100).toString().padStart(2, '0')}`;
+            const trend = closureRate > 80 ? '▲' : closureRate < -80 ? '▼' : '•';
+            ctx.fillStyle = color;
+            ctx.font = '700 18px JetBrains Mono, monospace';
+            ctx.textAlign = 'left';
+            ctx.fillText((plane.flight || plane.hex || 'UNK').trim().slice(0, 8), x + 14, y - 12);
+            ctx.fillStyle = '#e2e8f0';
+            ctx.font = '14px JetBrains Mono, monospace';
+            ctx.fillText(`${distance.toFixed(1)}mi ${altText} ${trend}`, x + 14, y + 8);
+        }
 
         function getPlaneAltitudeFeet(plane) {
             if (plane.alt_baro === 'ground') return 0;
@@ -1795,10 +1885,13 @@
                 list.innerHTML = '<span class="text-emerald-400">No nearby traffic inside simulated forward range.</span>';
                 return;
             }
-            list.innerHTML = visibleTraffic.map(({ plane, distance, bearing }) => {
+            list.innerHTML = visibleTraffic.map(({ plane, distance, relativeBearing, altitudeDelta, closureRate }) => {
                 const label = (plane.flight || plane.hex || 'UNKNOWN').trim();
                 const status = plane.isEmergency ? 'EMERG' : (plane.isMilitary ? 'MIL' : 'TRAFFIC');
-                return `<span class="inline-block mr-2 mb-1"><strong class="text-slate-200">${label}</strong> ${distance.toFixed(1)}mi ${Math.round(bearing)}° <em class="text-radar-glow not-italic">${status}</em></span>`;
+                const side = relativeBearing > 8 ? 'R' : (relativeBearing < -8 ? 'L' : 'AHEAD');
+                const altitudeText = `${altitudeDelta >= 0 ? '+' : '-'}${Math.round(Math.abs(altitudeDelta) / 100)}00ft`;
+                const closureText = closureRate > 80 ? 'closing' : (closureRate < -80 ? 'opening' : 'steady');
+                return `<span class="inline-block mr-2 mb-1"><strong class="text-slate-200">${label}</strong> ${side} ${distance.toFixed(1)}mi ${altitudeText} ${closureText} <em class="text-radar-glow not-italic">${status}</em></span>`;
             }).join('');
         }
 
