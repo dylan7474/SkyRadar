@@ -1,12 +1,13 @@
 # SkyRadar
 
-SkyRadar is a browser-based tactical ADS-B flight tracker for viewing nearby aircraft on an interactive map. It uses your browser location (or a manually entered position), queries public aircraft data, and presents live traffic with a radar-inspired dashboard, aircraft list, system logs, and map overlays.
+SkyRadar is a browser-based tactical ADS-B and AIS tracker for viewing nearby aircraft and ships on an interactive map. It uses your browser location (or a manually entered position), queries public aircraft data, and presents live traffic with a radar-inspired dashboard, aircraft list, system logs, and map overlays.
 
 The application is currently a static HTML app in `index.html` that loads its UI dependencies from public CDNs, including Tailwind CSS and Leaflet.
 
 ## Features
 
 - Live nearby aircraft display using a configurable search radius.
+- Optional AISstream.io WebSocket overlay for vessels inside the same radar radius.
 - Interactive Leaflet map with custom aircraft markers and heading-aware styling.
 - Browser geolocation with manual coordinate override support.
 - Sidebar aircraft list and system log views.
@@ -46,12 +47,14 @@ http://localhost:8000
 - **Zoom + / −**: Adjust the map zoom level.
 - **Adjust Location**: Enter coordinates manually when you do not want to use browser geolocation or need to scan another area.
 - **Auto Updates**: Use the refresh control to keep nearby aircraft data current.
+- **AIS Ships OFF / ON**: Enter your own AISstream.io API key to subscribe to live vessel position reports for the current radar range. The key is stored only in your browser localStorage; no API keys are committed or bundled.
 - **Aircraft View**: Review detected aircraft and select entries for more detail. Selecting an aircraft opens the cockpit view, which attempts to draw nearby airport runways in the forward window when OpenStreetMap aeroway data is available.
 - **System Logs**: Inspect app messages, API status, and warnings.
 
 ## Data Sources and Limitations
 
 - Aircraft traffic uses public ADS-B-derived data sources from the browser.
+- Ship traffic uses AISstream.io over a browser WebSocket when you enable AIS and provide your own API key. SkyRadar subscribes to a bounding box around the selected radar center and filters vessels to the configured circular range.
 - Cockpit runway cues query OpenStreetMap Overpass for nearby `aeroway=runway` geometry and render a simplified synthetic view; runway availability depends on network access, Overpass rate limits, and OpenStreetMap coverage.
 
 ## Roadmap
