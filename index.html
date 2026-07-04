@@ -1860,8 +1860,9 @@
             const shipsInView = getCockpitShipsInView(selectedPlane, heading);
             document.getElementById('cockpit-range').innerText = `FWD ${cockpitForwardFovDegrees}° · ${cockpitRangeMiles} MI${shipsInView.length ? ` · ${shipsInView.length} AIS` : ''}`;
 
-            drawCockpitCanvas(canvas, selectedPlane, traffic, heading, runways, shipsInView);
-            drawCockpitInstruments(selectedPlane);
+            const attitude = getEstimatedAttitude(selectedPlane);
+            drawCockpitCanvas(canvas, selectedPlane, traffic, heading, runways, shipsInView, attitude);
+            drawCockpitInstruments(selectedPlane, attitude);
             cockpit.classList.remove('hidden');
         }
 
@@ -1892,13 +1893,12 @@
             return ownTowardTraffic + trafficTowardOwnship;
         }
 
-        function drawCockpitCanvas(canvas, selectedPlane, traffic, heading, runways = [], shipsInView = []) {
+        function drawCockpitCanvas(canvas, selectedPlane, traffic, heading, runways = [], shipsInView = [], attitude = getEstimatedAttitude(selectedPlane)) {
             const ctx = canvas.getContext('2d');
             const width = canvas.width;
             const height = canvas.height;
             ctx.clearRect(0, 0, width, height);
 
-            const attitude = getEstimatedAttitude(selectedPlane);
             drawBankedCockpitHorizon(ctx, width, height, attitude);
             drawSyntheticRunways(ctx, width, height, selectedPlane, heading, attitude, runways);
             drawHudCompassTape(ctx, width, heading);
@@ -2333,7 +2333,7 @@
             };
         }
 
-        function drawCockpitInstruments(plane) {
+        function drawCockpitInstruments(plane, attitude = getEstimatedAttitude(plane)) {
             const canvas = document.getElementById('cockpit-instruments');
             if (!canvas) return;
             const ctx = canvas.getContext('2d');
@@ -2343,7 +2343,6 @@
             const altitude = getPlaneAltitudeFeet(plane);
             const heading = Number.parseFloat(plane.track ?? plane.true_heading ?? plane.mag_heading ?? 0) || 0;
             const verticalSpeed = getPlaneVerticalSpeedFpm(plane);
-            const attitude = getEstimatedAttitude(plane);
             const gauges = [
                 { x: 130, y: 130, title: 'AIRSPEED', subtitle: 'KNOTS', type: 'asi', value: speed, min: 0, max: 500, major: 100 },
                 { x: 390, y: 130, title: 'ATTITUDE', subtitle: 'EST', type: 'attitude', value: attitude },
