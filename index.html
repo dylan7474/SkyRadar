@@ -660,6 +660,8 @@
         let locationAcquired = false;
         let isSimulatingDemo = false;
         const cockpitRangeMiles = 15;
+        const cockpitForwardFovDegrees = 70;
+        const cockpitHalfFovDegrees = cockpitForwardFovDegrees / 2;
         const cockpitRunwayRangeMiles = 18;
         const cockpitRunwayCache = new Map();
         const cockpitRunwayRequests = new Set();
@@ -1852,11 +1854,11 @@
                     const closureRate = estimateClosureRate(selectedPlane, plane, bearing);
                     return { plane, distance, bearing, relativeBearing, altitudeDelta, closureRate };
                 })
-                .filter(item => item.distance <= cockpitRangeMiles)
+                .filter(item => item.distance <= cockpitRangeMiles && Math.abs(item.relativeBearing) <= cockpitHalfFovDegrees)
                 .sort((a, b) => a.distance - b.distance);
 
             const shipsInView = getCockpitShipsInView(selectedPlane, heading);
-            document.getElementById('cockpit-range').innerText = `RANGE ${cockpitRangeMiles} MI${shipsInView.length ? ` · ${shipsInView.length} AIS` : ''}`;
+            document.getElementById('cockpit-range').innerText = `FWD ${cockpitForwardFovDegrees}° · ${cockpitRangeMiles} MI${shipsInView.length ? ` · ${shipsInView.length} AIS` : ''}`;
 
             drawCockpitCanvas(canvas, selectedPlane, traffic, heading, runways, shipsInView);
             drawCockpitInstruments(selectedPlane);
@@ -1865,15 +1867,17 @@
 
 
         function getCockpitShipsInView(selectedPlane, heading) {
+            const ownshipAltitude = getPlaneAltitudeFeet(selectedPlane);
             return shipList
                 .filter(ship => ship.lat !== undefined && ship.lon !== undefined)
                 .map(ship => {
                     const distance = getHaversineDistance(selectedPlane.lat, selectedPlane.lon, ship.lat, ship.lon);
                     const bearing = getBearingDegrees(selectedPlane.lat, selectedPlane.lon, ship.lat, ship.lon);
                     const relativeBearing = normalizeAngle(bearing - heading);
-                    return { ship, distance, bearing, relativeBearing };
+                    const altitudeDelta = -ownshipAltitude;
+                    return { ship, distance, bearing, relativeBearing, altitudeDelta };
                 })
-                .filter(item => item.distance <= cockpitRangeMiles && Math.abs(item.relativeBearing) <= 100)
+                .filter(item => item.distance <= cockpitRangeMiles && Math.abs(item.relativeBearing) <= cockpitHalfFovDegrees)
                 .sort((a, b) => a.distance - b.distance)
                 .slice(0, 8);
         }
@@ -2017,7 +2021,7 @@
                     const alignment = Math.min(Math.abs(normalizeAngle(runway.heading - heading)), Math.abs(normalizeAngle(runway.reciprocal - heading)));
                     return { runway, distance, relativeBearing, alignment };
                 })
-                .filter(item => item.distance <= cockpitRunwayRangeMiles && Math.abs(item.relativeBearing) <= 55)
+                .filter(item => item.distance <= cockpitRunwayRangeMiles && Math.abs(item.relativeBearing) <= cockpitHalfFovDegrees)
                 .sort((a, b) => a.distance - b.distance)
                 .slice(0, 3);
 
@@ -2034,7 +2038,7 @@
             const depth = Math.max(0.08, 1 - distance / cockpitRunwayRangeMiles);
             const pitch = Math.max(-15, Math.min(15, attitude.pitch || 0));
             const bank = Math.max(-45, Math.min(45, attitude.bank || 0));
-            const centerX = width / 2 + (relativeBearing / 55) * (width * 0.42);
+            const centerX = width / 2 + (relativeBearing / cockpitHalfFovDegrees) * (width * 0.42);
             const horizonY = height * 0.48 + pitch * 2.4;
             const runwayTopY = horizonY + 28 + (1 - depth) * 58;
             const runwayBottomY = Math.min(height - 74, runwayTopY + 52 + depth * 170);
@@ -2154,7 +2158,7 @@
             const horizonY = height * 0.31;
             const ownshipY = height - 78;
             const lateralSpread = width * (0.18 + 0.28 * closeness);
-            const x = width / 2 + (relativeBearing / 100) * lateralSpread;
+            const x = width / 2 + (relativeBearing / cockpitHalfFovDegrees) * lateralSpread;
             const altitudeOffset = Math.max(-52, Math.min(52, altitudeDelta / 110));
             const y = horizonY + (ownshipY - horizonY) * perspective - altitudeOffset;
             const scale = 0.34 + perspective * 1.72;
@@ -2163,8 +2167,8 @@
         }
 
         function drawHudShip(ctx, width, height, item, heading) {
-            const { ship, distance, relativeBearing } = item;
-            const { x, y, scale } = getCockpitTrafficProjection(width, height, distance, relativeBearing, 0);
+            const { ship, distance, relativeBearing, altitudeDelta } = item;
+            const { x, y, scale } = getCockpitTrafficProjection(width, height, distance, relativeBearing, altitudeDelta);
             const shipHeading = Number.isFinite(ship.heading) && ship.heading < 511
                 ? ship.heading
                 : (Number.isFinite(ship.course) ? ship.course : heading + relativeBearing);
@@ -2178,7 +2182,7 @@
 
         function drawHudTraffic(ctx, width, height, item, heading) {
             const { plane, distance, relativeBearing, altitudeDelta, closureRate } = item;
-            if (Math.abs(relativeBearing) > 100) return;
+            if (Math.abs(relativeBearing) > cockpitHalfFovDegrees) return;
             const { x, y, scale } = getCockpitTrafficProjection(width, height, distance, relativeBearing, altitudeDelta);
             const color = plane.isEmergency ? '#ef4444' : (Math.abs(altitudeDelta) < 1000 && distance < 5 ? '#facc15' : (plane.isMilitary ? '#38bdf8' : '#f59e0b'));
             drawCockpitVectorAircraft(ctx, x, y, scale, normalizeAngle((plane.track || heading) - heading), {
