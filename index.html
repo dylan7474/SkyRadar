@@ -138,6 +138,41 @@
         .plane-svg-wrapper:hover {
             transform: scale(1.2);
         }
+        .selected-plane-target .plane-svg-wrapper {
+            animation: selected-plane-flash 0.9s ease-in-out infinite;
+        }
+        .selected-plane-target .aircraft-label {
+            border-left-width: 3px !important;
+            box-shadow: 0 0 18px rgba(16, 185, 129, 0.7), 0 4px 10px rgba(0,0,0,0.35) !important;
+        }
+        .selected-plane-target-ring {
+            position: absolute;
+            left: 79px;
+            width: 42px;
+            height: 42px;
+            border: 2px solid #f8fafc;
+            border-radius: 9999px;
+            box-shadow: 0 0 16px #10B981, inset 0 0 12px rgba(16,185,129,0.35);
+            opacity: 0.95;
+            animation: selected-plane-ring 0.9s ease-in-out infinite;
+            pointer-events: none;
+            z-index: 6;
+        }
+        @keyframes selected-plane-flash {
+            0%, 100% { filter: drop-shadow(0 0 4px #f8fafc) drop-shadow(0 0 12px #10B981); transform: scale(1); }
+            50% { filter: drop-shadow(0 0 10px #f8fafc) drop-shadow(0 0 22px #10B981); transform: scale(1.28); }
+        }
+        @keyframes selected-plane-ring {
+            0%, 100% { opacity: 0.35; transform: scale(0.86); }
+            50% { opacity: 1; transform: scale(1.18); }
+        }
+
+        /* Keep Leaflet's panes in their default projection so map tiles,
+           aircraft markers, range rings, and the user marker share the same
+           coordinate plane. */
+        #map .leaflet-tile-pane {
+            filter: saturate(0.85) contrast(1.08) brightness(0.78);
+        }
 
         /* Radar sweep effect overlay */
         .radar-sweep-container {
@@ -154,6 +189,27 @@
             position: absolute; top: -50%; left: -50%;
             transform-origin: center center;
             animation: radar-sweep 4s linear infinite;
+        }
+
+        #cockpit-view {
+            transition: width 0.2s ease, max-width 0.2s ease, transform 0.2s ease;
+        }
+        #cockpit-view.cockpit-expanded {
+            width: min(920px, calc(100% - 2rem));
+        }
+        #cockpit-view.cockpit-expanded #cockpit-canvas {
+            height: 300px;
+        }
+        #cockpit-view.cockpit-expanded #cockpit-instruments {
+            height: 470px;
+        }
+        @media (max-width: 640px) {
+            #cockpit-view.cockpit-expanded {
+                inset: 1rem;
+                width: auto;
+                max-width: none;
+                overflow-y: auto;
+            }
         }
     </style>
 </head>
@@ -364,8 +420,38 @@
                 <!-- Target Data Injected Here -->
             </div>
 
+            <!-- Simulated cockpit view for selected target -->
+            <div id="cockpit-view" class="absolute bottom-4 left-4 bg-slate-950/90 backdrop-blur-md border border-radar-glow/40 rounded-xl shadow-2xl z-[520] hidden w-[420px] max-w-[calc(100%-2rem)] overflow-hidden pointer-events-auto">
+                <div class="flex items-center justify-between px-3 py-2 border-b border-radar-border bg-slate-900/90">
+                    <div>
+                        <h4 class="text-xs font-bold uppercase tracking-[0.18em] text-radar-glow">Simulated Cockpit View</h4>
+                        <p id="cockpit-subtitle" class="text-[10px] text-slate-400 mono">Select an aircraft to initialize</p>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button id="btn-cockpit-zoom" class="text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-md px-2 h-6 text-[10px] mono transition-colors" aria-label="Toggle larger cockpit instruments" title="Toggle larger cockpit instruments">ZOOM</button>
+                        <button onclick="hideHUD()" class="text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-full w-6 h-6 flex items-center justify-center transition-colors" aria-label="Close cockpit view">✕</button>
+                    </div>
+                </div>
+                <div class="relative bg-gradient-to-b from-sky-950 via-slate-950 to-emerald-950">
+                    <canvas id="cockpit-canvas" width="680" height="400" class="block w-full h-[200px]" aria-label="Pilot-relative cockpit view showing banked horizon and nearby traffic cues"></canvas>
+                    <div class="absolute left-3 bottom-2 right-3 flex items-center justify-between text-[10px] mono text-slate-300 pointer-events-none">
+                        <span id="cockpit-heading" class="bg-slate-950/75 border border-slate-700 rounded px-1.5 py-0.5">HDG --°</span>
+                        <span id="cockpit-range" class="bg-slate-950/75 border border-slate-700 rounded px-1.5 py-0.5">RANGE 15 MI</span>
+                        <span id="cockpit-altitude" class="bg-slate-950/75 border border-slate-700 rounded px-1.5 py-0.5">ALT -- FT</span>
+                    </div>
+                </div>
+                <div class="border-t border-radar-border bg-slate-950 px-3 py-3">
+                    <div class="mb-2 flex items-center justify-between">
+                        <span class="text-[10px] font-bold uppercase tracking-[0.16em] text-radar-glow">Primary Flight Display</span>
+                        <span id="instrument-source-note" class="text-[9px] text-slate-500 mono">ADS-B simulated</span>
+                    </div>
+                    <canvas id="cockpit-instruments" width="780" height="520" class="block w-full h-[260px]" aria-label="Six pack flight instruments based on selected aircraft telemetry"></canvas>
+                    <p class="mt-2 text-[9px] leading-snug text-slate-500">Six-pack values are derived from ADS-B telemetry; bank and pitch are estimated from track and vertical-rate changes.</p>
+                </div>
+            </div>
+
             <!-- Calibration indicator inside map UI -->
-            <div class="absolute bottom-4 left-4 bg-radar-base/90 backdrop-blur border border-radar-border rounded-lg p-3 z-30 text-xs shadow-xl hidden sm:block max-w-[200px]">
+            <div class="absolute bottom-4 right-4 bg-radar-base/90 backdrop-blur border border-radar-border rounded-lg p-3 z-30 text-xs shadow-xl hidden sm:block max-w-[200px]">
                 <h4 class="font-bold text-white mb-1.5 flex items-center gap-1.5">
                     <span class="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></span>
                     Coverage Radar
@@ -536,6 +622,7 @@
         let userMarker = null;
         let radarCircle = null;
         let aircraftList = [];
+        let lastRenderedPlanes = [];
         let mapMarkers = {}; // Map of hex codes to leaflet markers
         let currentFilters = {
             search: '',
@@ -548,9 +635,10 @@
         let refreshTimeoutId = null;
         let locationAcquired = false;
         let isSimulatingDemo = false;
-
+        const cockpitRangeMiles = 15;
+        const cockpitTrackHistory = {};
         // Custom SVGs for crisp 2.5D Parallax Markers
-        function get2_5DMarkerHTML(plane, colorTheme, stalkHeight) {
+        function get2_5DMarkerHTML(plane, colorTheme, stalkHeight, isSelected = false) {
             const rotAngle = plane.track !== undefined && plane.track !== null ? Math.round(plane.track) : 0;
             const isMilitary = plane.isMilitary;
             const outlineColor = isMilitary ? '#38BDF8' : colorTheme;
@@ -590,11 +678,16 @@
                 </div>
             `;
 
+            const selectedRingHtml = isSelected
+                ? `<div class="selected-plane-target-ring" style="bottom: ${stalkHeight - 21}px;"></div>`
+                : '';
+
             // Wrapper container fixed at 200px width. Anchor is exactly center [100, 220]
             return `
-                <div style="position: relative; width: 200px; height: 220px; pointer-events: none;">
+                <div class="${isSelected ? 'selected-plane-target' : ''}" style="position: relative; width: 200px; height: 220px; pointer-events: none;">
                     ${stalkHtml}
                     ${groundHtml}
+                    ${selectedRingHtml}
                     ${planeHtml}
                     ${labelHtml}
                 </div>
@@ -627,8 +720,14 @@
                 L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
                     maxZoom: 20
                 }).addTo(map);
+
+                window.addEventListener('resize', () => {
+                    if (map) {
+                        map.invalidateSize();
+                    }
+                });
                 
-                logger.add("Leaflet interactive 2D canvas established. Rendering Engine set to 2.5D Parallax overlay.", "success");
+                logger.add("Leaflet interactive canvas established. Map projection synchronized with target overlays.", "success");
             } catch(e) {
                 logger.add("Map failed to load correctly: " + e.message, "error", e);
             }
@@ -838,6 +937,19 @@
                 if (map) map.zoomOut();
             });
 
+            document.getElementById('btn-cockpit-zoom').addEventListener('click', () => {
+                const cockpit = document.getElementById('cockpit-view');
+                const zoomButton = document.getElementById('btn-cockpit-zoom');
+                if (!cockpit || !zoomButton) return;
+                const expanded = cockpit.classList.toggle('cockpit-expanded');
+                zoomButton.innerText = expanded ? 'COMPACT' : 'ZOOM';
+                zoomButton.setAttribute('aria-pressed', String(expanded));
+                if (activeSelectedHex) {
+                    const activePlane = aircraftList.find(plane => plane.hex === activeSelectedHex);
+                    if (activePlane) updateCockpitView(activePlane);
+                }
+            });
+
             // Sidebar Toggle Logic
             let isSidebarVisible = false;
             const btnToggleSidebar = document.getElementById('btn-toggle-sidebar');
@@ -866,7 +978,11 @@
                 }
                 
                 // Important: Trigger Leaflet to recalculate its viewport constraints when the container resizes
-                setTimeout(() => { if (map) map.invalidateSize(); }, 300);
+                setTimeout(() => {
+                    if (map) {
+                        map.invalidateSize();
+                    }
+                }, 300);
             });
 
             // Manual Location Dialog triggers
@@ -885,7 +1001,7 @@
                 const latInput = parseFloat(document.getElementById('manual-lat').value);
                 const lonInput = parseFloat(document.getElementById('manual-lon').value);
 
-                if (isNaN(latInput) || i/NaN(lonInput) || latInput < -90 || latInput > 90 || lonInput < -180 || lonInput > 180) {
+                if (isNaN(latInput) || isNaN(lonInput) || latInput < -90 || latInput > 90 || lonInput < -180 || lonInput > 180) {
                     showNotification('Input Error', 'Please specify legal coordinates (Latitude -90 to 90, Longitude -180 to 180)', 'danger');
                     logger.add("Rejected illegal custom tracking coordinate inputs.", "warning");
                     return;
@@ -1215,6 +1331,7 @@
                     alt_baro: isEmergency && i === 6 ? 34000 : (Math.random() > 0.8 ? "ground" : Math.floor(25 + Math.random() * 350) * 100),
                     gs: 80 + Math.random() * 450,
                     track: Math.floor(Math.random() * 360),
+                    baro_rate: Math.floor(-18 + Math.random() * 36) * 100,
                     squawk: squawks[i],
                     dbFlags: isMilitary ? 1 : 0,
                     calculatedDistance: distanceMiles,
@@ -1279,6 +1396,8 @@
                 }
                 return 0;
             });
+
+            lastRenderedPlanes = filtered;
 
             // Render stats bar on side panel
             updateStatisticsDisplay(filtered);
@@ -1431,12 +1550,464 @@
                 <div class="mt-2 text-[9px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded inline-block font-mono border border-slate-700">HEX: ${plane.hex ? plane.hex.toUpperCase() : ''}</div>
             `;
             hud.classList.remove('hidden');
+            updateCockpitView(plane);
         }
 
         function hideHUD() {
             activeSelectedHex = null;
             document.getElementById('hud-overlay').classList.add('hidden');
-            renderListPanel(aircraftList); // Clear side selection
+            hideCockpitView();
+            renderListPanel(lastRenderedPlanes); // Clear side selection while preserving active filters
+            syncMapMarkers(lastRenderedPlanes);
+        }
+
+        function hideCockpitView() {
+            const cockpit = document.getElementById('cockpit-view');
+            if (cockpit) cockpit.classList.add('hidden');
+        }
+
+        function updateCockpitView(selectedPlane) {
+            const cockpit = document.getElementById('cockpit-view');
+            const canvas = document.getElementById('cockpit-canvas');
+            if (!cockpit || !canvas || selectedPlane.lat === undefined || selectedPlane.lon === undefined) return;
+
+            const heading = selectedPlane.track !== undefined && selectedPlane.track !== null ? Math.round(selectedPlane.track) : 0;
+            const altitude = getPlaneAltitudeFeet(selectedPlane);
+            const callsign = selectedPlane.flight ? selectedPlane.flight.trim() : (selectedPlane.hex ? selectedPlane.hex.toUpperCase() : 'UNKNOWN');
+            document.getElementById('cockpit-subtitle').innerText = `${callsign} pilot-relative traffic picture`;
+            document.getElementById('cockpit-heading').innerText = `HDG ${String(heading).padStart(3, '0')}°`;
+            document.getElementById('cockpit-range').innerText = `RANGE ${cockpitRangeMiles} MI`;
+            document.getElementById('cockpit-altitude').innerText = `ALT ${Math.round(altitude).toLocaleString()} FT`;
+
+            const traffic = aircraftList
+                .filter(plane => plane.hex !== selectedPlane.hex && plane.lat !== undefined && plane.lon !== undefined)
+                .map(plane => {
+                    const distance = getHaversineDistance(selectedPlane.lat, selectedPlane.lon, plane.lat, plane.lon);
+                    const bearing = getBearingDegrees(selectedPlane.lat, selectedPlane.lon, plane.lat, plane.lon);
+                    const relativeBearing = normalizeAngle(bearing - heading);
+                    const altitudeDelta = getPlaneAltitudeFeet(plane) - altitude;
+                    const closureRate = estimateClosureRate(selectedPlane, plane, bearing);
+                    return { plane, distance, bearing, relativeBearing, altitudeDelta, closureRate };
+                })
+                .filter(item => item.distance <= cockpitRangeMiles)
+                .sort((a, b) => a.distance - b.distance);
+
+            drawCockpitCanvas(canvas, selectedPlane, traffic, heading);
+            drawCockpitInstruments(selectedPlane);
+            cockpit.classList.remove('hidden');
+        }
+
+        function estimateClosureRate(ownship, trafficPlane, bearingToTraffic) {
+            const ownSpeed = Number.parseFloat(ownship.gs ?? 0) || 0;
+            const trafficSpeed = Number.parseFloat(trafficPlane.gs ?? 0) || 0;
+            const ownTrack = Number.parseFloat(ownship.track ?? ownship.true_heading ?? ownship.mag_heading ?? 0) || 0;
+            const trafficTrack = Number.parseFloat(trafficPlane.track ?? trafficPlane.true_heading ?? trafficPlane.mag_heading ?? bearingToTraffic) || bearingToTraffic;
+            const ownTowardTraffic = ownSpeed * Math.cos(normalizeAngle(ownTrack - bearingToTraffic) * Math.PI / 180);
+            const trafficTowardOwnship = trafficSpeed * Math.cos(normalizeAngle(trafficTrack - normalizeAngle(bearingToTraffic + 180)) * Math.PI / 180);
+            return ownTowardTraffic + trafficTowardOwnship;
+        }
+
+        function drawCockpitCanvas(canvas, selectedPlane, traffic, heading) {
+            const ctx = canvas.getContext('2d');
+            const width = canvas.width;
+            const height = canvas.height;
+            ctx.clearRect(0, 0, width, height);
+
+            const attitude = getEstimatedAttitude(selectedPlane);
+            drawBankedCockpitHorizon(ctx, width, height, attitude);
+            drawHudCompassTape(ctx, width, heading);
+            drawHudTrafficScope(ctx, width, height);
+
+            traffic.forEach(item => drawHudTraffic(ctx, width, height, item, heading));
+
+            drawOwnshipSymbol(ctx, width, height);
+        }
+
+        function drawBankedCockpitHorizon(ctx, width, height, attitude) {
+            const pitch = Math.max(-15, Math.min(15, attitude.pitch || 0));
+            const bank = Math.max(-45, Math.min(45, attitude.bank || 0));
+            const horizonOffset = pitch * 2.4;
+            const fillSize = Math.hypot(width, height) * 1.25;
+
+            ctx.save();
+            ctx.translate(width / 2, height * 0.48);
+            // In an aircraft-fixed cockpit view, the outside horizon moves opposite the
+            // aircraft bank: a right turn lowers the right wing, so the horizon tilts left.
+            ctx.rotate(-bank * Math.PI / 180);
+            ctx.translate(0, horizonOffset);
+
+            const skyGradient = ctx.createLinearGradient(0, -fillSize, 0, 0);
+            skyGradient.addColorStop(0, '#075985');
+            skyGradient.addColorStop(0.7, '#0f172a');
+            skyGradient.addColorStop(1, '#1e293b');
+            ctx.fillStyle = skyGradient;
+            ctx.fillRect(-fillSize, -fillSize, fillSize * 2, fillSize);
+
+            const groundGradient = ctx.createLinearGradient(0, 0, 0, fillSize);
+            groundGradient.addColorStop(0, '#0f766e');
+            groundGradient.addColorStop(0.35, '#064e3b');
+            groundGradient.addColorStop(1, '#020617');
+            ctx.fillStyle = groundGradient;
+            ctx.fillRect(-fillSize, 0, fillSize * 2, fillSize);
+
+            ctx.strokeStyle = 'rgba(248, 250, 252, 0.55)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(-fillSize, 0);
+            ctx.lineTo(fillSize, 0);
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        function drawHudCompassTape(ctx, width, heading) {
+            ctx.fillStyle = 'rgba(2, 6, 23, 0.62)';
+            ctx.fillRect(width / 2 - 170, 12, 340, 34);
+            ctx.strokeStyle = 'rgba(16, 185, 129, 0.8)';
+            ctx.strokeRect(width / 2 - 170, 12, 340, 34);
+            ctx.fillStyle = '#bbf7d0';
+            ctx.font = '13px JetBrains Mono, monospace';
+            ctx.textAlign = 'center';
+            for (let offset = -60; offset <= 60; offset += 15) {
+                const hdg = Math.round((heading + offset + 360) % 360);
+                const x = width / 2 + offset * 2.35;
+                ctx.fillText(hdg === 0 ? '360' : String(hdg).padStart(3, '0'), x, 34);
+            }
+            ctx.fillStyle = '#10b981';
+            ctx.beginPath();
+            ctx.moveTo(width / 2, 48);
+            ctx.lineTo(width / 2 - 7, 58);
+            ctx.lineTo(width / 2 + 7, 58);
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        function drawHudTrafficScope(ctx, width, height) {
+            const scopeY = height - 86;
+            ctx.strokeStyle = 'rgba(16, 185, 129, 0.28)';
+            ctx.lineWidth = 1;
+            [0.33, 0.66, 1].forEach((scale, index) => {
+                ctx.beginPath();
+                ctx.ellipse(width / 2, scopeY, 230 * scale, 42 * scale, 0, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.fillStyle = 'rgba(203, 213, 225, 0.8)';
+                ctx.font = '10px JetBrains Mono, monospace';
+                ctx.textAlign = 'left';
+                ctx.fillText(`${Math.round(cockpitRangeMiles * scale)} MI`, width / 2 + 236 * scale, scopeY + 4 + index * 2);
+            });
+            ctx.beginPath();
+            ctx.moveTo(width / 2, 64);
+            ctx.lineTo(width / 2, height - 32);
+            ctx.stroke();
+        }
+
+        function drawOwnshipSymbol(ctx, width, height) {
+            const y = height - 66;
+            ctx.strokeStyle = '#34d399';
+            ctx.fillStyle = '#10b981';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(width / 2, y - 25);
+            ctx.lineTo(width / 2 - 18, y + 16);
+            ctx.lineTo(width / 2, y + 7);
+            ctx.lineTo(width / 2 + 18, y + 16);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+        }
+
+        function drawHudTraffic(ctx, width, height, item, heading) {
+            const { plane, distance, relativeBearing, altitudeDelta, closureRate } = item;
+            if (Math.abs(relativeBearing) > 100) return;
+            const depth = Math.max(0, 1 - distance / cockpitRangeMiles);
+            const x = width / 2 + (relativeBearing / 100) * (width * 0.44);
+            const y = height - 86 - depth * 178 - Math.max(-44, Math.min(44, altitudeDelta / 120));
+            const size = 9 + depth * 8;
+            const color = plane.isEmergency ? '#ef4444' : (Math.abs(altitudeDelta) < 1000 && distance < 5 ? '#facc15' : (plane.isMilitary ? '#38bdf8' : '#f59e0b'));
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.rotate(normalizeAngle((plane.track || heading) - heading) * Math.PI / 180);
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.moveTo(0, -size);
+            ctx.lineTo(size * 0.7, size);
+            ctx.lineTo(0, size * 0.45);
+            ctx.lineTo(-size * 0.7, size);
+            ctx.closePath();
+            ctx.fill();
+            ctx.restore();
+
+            const altText = `${altitudeDelta >= 0 ? '+' : '-'}${Math.round(Math.abs(altitudeDelta) / 100).toString().padStart(2, '0')}`;
+            const trend = closureRate > 80 ? '▲' : closureRate < -80 ? '▼' : '•';
+            ctx.fillStyle = color;
+            ctx.font = '700 18px JetBrains Mono, monospace';
+            ctx.textAlign = 'left';
+            ctx.fillText((plane.flight || plane.hex || 'UNK').trim().slice(0, 8), x + 14, y - 12);
+            ctx.fillStyle = '#e2e8f0';
+            ctx.font = '14px JetBrains Mono, monospace';
+            ctx.fillText(`${distance.toFixed(1)}mi ${altText} ${trend}`, x + 14, y + 8);
+        }
+
+        function getPlaneAltitudeFeet(plane) {
+            if (plane.alt_baro === 'ground') return 0;
+            return Number.parseFloat(plane.alt_baro ?? plane.alt_geom ?? 0) || 0;
+        }
+
+        function getPlaneVerticalSpeedFpm(plane) {
+            return Number.parseFloat(plane.baro_rate ?? plane.geom_rate ?? 0) || 0;
+        }
+
+        function getEstimatedAttitude(plane) {
+            const hex = plane.hex || 'selected';
+            const now = Date.now();
+            const track = Number.parseFloat(plane.track ?? plane.true_heading ?? plane.mag_heading ?? 0) || 0;
+            const previous = cockpitTrackHistory[hex];
+            cockpitTrackHistory[hex] = { track, timestamp: now };
+
+            let turnRate = 0;
+            if (previous && now > previous.timestamp) {
+                const elapsedSeconds = Math.max((now - previous.timestamp) / 1000, 1);
+                turnRate = normalizeAngle(track - previous.track) / elapsedSeconds;
+            }
+
+            const speed = Math.max(Number.parseFloat(plane.gs ?? 0) || 0, 30);
+            const verticalSpeed = getPlaneVerticalSpeedFpm(plane);
+            const pitch = Math.max(-15, Math.min(15, (verticalSpeed / Math.max(speed * 100, 1)) * 95));
+            const bank = Math.max(-30, Math.min(30, turnRate * 7));
+            return { pitch, bank, turnRate };
+        }
+
+
+        function getEstimatedFlightPath(plane, speedKts, verticalSpeedFpm) {
+            const safeSpeed = Math.max(Number.parseFloat(speedKts) || 0, 0);
+            const verticalSpeed = Number.parseFloat(verticalSpeedFpm) || 0;
+            const nauticalMilesPerMinute = safeSpeed / 60;
+            const climbGradient = nauticalMilesPerMinute > 0.1 ? verticalSpeed / nauticalMilesPerMinute : 0;
+            const feetPerMinuteToKnots = 1 / 101.269;
+            const horizontalFeetPerMinute = safeSpeed * 6076.12 / 60;
+            const angle = horizontalFeetPerMinute > 1 ? Math.atan(verticalSpeed / horizontalFeetPerMinute) * 180 / Math.PI : 0;
+            const verticalSpeedKts = verticalSpeed * feetPerMinuteToKnots;
+            const totalEnergyKts = Math.sqrt((safeSpeed * safeSpeed) + (verticalSpeedKts * verticalSpeedKts));
+            const altitudeTrend = getPlaneAltitudeFeet(plane) + verticalSpeed;
+            return {
+                angle: Math.max(-12, Math.min(12, angle)),
+                climbGradient,
+                totalEnergyKts,
+                altitudeTrend
+            };
+        }
+
+        function drawCockpitInstruments(plane) {
+            const canvas = document.getElementById('cockpit-instruments');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            const speed = Number.parseFloat(plane.gs ?? 0) || 0;
+            const altitude = getPlaneAltitudeFeet(plane);
+            const heading = Number.parseFloat(plane.track ?? plane.true_heading ?? plane.mag_heading ?? 0) || 0;
+            const verticalSpeed = getPlaneVerticalSpeedFpm(plane);
+            const attitude = getEstimatedAttitude(plane);
+            const gauges = [
+                { x: 130, y: 130, title: 'AIRSPEED', subtitle: 'KNOTS', type: 'asi', value: speed, min: 0, max: 500, major: 100 },
+                { x: 390, y: 130, title: 'ATTITUDE', subtitle: 'EST', type: 'attitude', value: attitude },
+                { x: 650, y: 130, title: 'ALTIMETER', subtitle: 'FEET', type: 'altimeter', value: altitude },
+                { x: 130, y: 390, title: 'BANK/TURN', subtitle: 'DEG/SEC', type: 'turnCoordinator', value: attitude },
+                { x: 390, y: 390, title: 'HEADING', subtitle: 'DEGREES', type: 'heading', value: heading },
+                { x: 650, y: 390, title: 'VSI', subtitle: 'FT/MIN', type: 'vsi', value: verticalSpeed, min: -3000, max: 3000, major: 1000 }
+            ];
+            gauges.forEach(gauge => drawInstrument(ctx, gauge));
+        }
+
+        function drawInstrument(ctx, gauge) {
+            const r = 104;
+            ctx.save();
+            ctx.translate(gauge.x, gauge.y);
+            const bezel = ctx.createRadialGradient(-25, -30, 20, 0, 0, r + 10);
+            bezel.addColorStop(0, '#475569');
+            bezel.addColorStop(0.45, '#111827');
+            bezel.addColorStop(1, '#020617');
+            ctx.fillStyle = bezel;
+            ctx.beginPath();
+            ctx.arc(0, 0, r + 12, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = '#64748b';
+            ctx.lineWidth = 3;
+            ctx.stroke();
+            ctx.fillStyle = '#050816';
+            ctx.beginPath();
+            ctx.arc(0, 0, r, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.clip();
+
+            if (gauge.type === 'attitude') drawAttitudeFace(ctx, gauge.value, r);
+            else if (gauge.type === 'turnCoordinator') drawTurnCoordinator(ctx, gauge.value, r);
+            else if (gauge.type === 'heading') drawHeadingIndicator(ctx, gauge.value, r);
+            else if (gauge.type === 'altimeter') drawAltimeter(ctx, gauge.value, r);
+            else drawRoundScale(ctx, gauge, r);
+
+            ctx.restore();
+            ctx.save();
+            ctx.translate(gauge.x, gauge.y);
+            ctx.fillStyle = '#e2e8f0';
+            ctx.font = '700 15px JetBrains Mono, monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(gauge.title, 0, 70);
+            ctx.fillStyle = '#94a3b8';
+            ctx.font = '10px JetBrains Mono, monospace';
+            ctx.fillText(gauge.subtitle, 0, 85);
+            ctx.restore();
+        }
+
+        function drawRoundScale(ctx, gauge, r) {
+            const start = 135 * Math.PI / 180;
+            const sweep = 270 * Math.PI / 180;
+            const value = Math.max(gauge.min, Math.min(gauge.max, gauge.value));
+            for (let v = gauge.min; v <= gauge.max; v += gauge.major / 2) {
+                const a = start + ((v - gauge.min) / (gauge.max - gauge.min)) * sweep;
+                const major = v % gauge.major === 0;
+                ctx.strokeStyle = '#e5e7eb'; ctx.lineWidth = major ? 3 : 1;
+                ctx.beginPath(); ctx.moveTo(Math.cos(a) * (r - 18), Math.sin(a) * (r - 18)); ctx.lineTo(Math.cos(a) * (r - (major ? 34 : 27)), Math.sin(a) * (r - (major ? 34 : 27))); ctx.stroke();
+                if (major) { ctx.fillStyle = '#e5e7eb'; ctx.font = '13px JetBrains Mono, monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(String(Math.abs(v / (gauge.type === 'vsi' ? 1000 : 1))), Math.cos(a) * (r - 48), Math.sin(a) * (r - 48)); }
+            }
+            const angle = start + ((value - gauge.min) / (gauge.max - gauge.min)) * sweep;
+            drawNeedle(ctx, angle, r - 42, gauge.type === 'vsi' ? '#F59E0B' : '#EF4444');
+            if (gauge.showValue !== false) { ctx.fillStyle = '#f8fafc'; ctx.font = '700 18px JetBrains Mono, monospace'; ctx.textAlign = 'center'; ctx.fillText(Math.round(gauge.value).toLocaleString(), 0, 34); }
+        }
+
+        function drawNeedle(ctx, angle, length, color) {
+            ctx.strokeStyle = color; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(Math.cos(angle) * length, Math.sin(angle) * length); ctx.stroke();
+            ctx.fillStyle = '#e5e7eb'; ctx.beginPath(); ctx.arc(0, 0, 7, 0, Math.PI * 2); ctx.fill();
+        }
+
+        function drawAttitudeFace(ctx, attitude, r) {
+            ctx.save(); ctx.rotate(-attitude.bank * Math.PI / 180); ctx.translate(0, attitude.pitch * 3.2);
+            ctx.fillStyle = '#2563eb'; ctx.fillRect(-r, -r * 2, r * 2, r * 2);
+            ctx.fillStyle = '#92400e'; ctx.fillRect(-r, 0, r * 2, r * 2);
+            ctx.strokeStyle = '#f8fafc'; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(-r, 0); ctx.lineTo(r, 0); ctx.stroke();
+            ctx.strokeStyle = 'rgba(248,250,252,.75)'; ctx.lineWidth = 2;
+            [-20,-10,10,20].forEach(p => { const y = -p * 3.2; ctx.beginPath(); ctx.moveTo(-26, y); ctx.lineTo(26, y); ctx.stroke(); });
+            ctx.restore();
+            ctx.strokeStyle = '#facc15'; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(-48, 0); ctx.lineTo(-14, 0); ctx.moveTo(14, 0); ctx.lineTo(48, 0); ctx.moveTo(0, 8); ctx.lineTo(0, -10); ctx.stroke();
+            ctx.fillStyle = '#f8fafc'; ctx.font = '12px JetBrains Mono, monospace'; ctx.textAlign = 'center'; ctx.fillText(`${Math.round(attitude.pitch)}° pitch`, 0, -66); ctx.fillText(`${Math.round(attitude.bank)}° bank`, 0, 54);
+        }
+
+        function drawTurnCoordinator(ctx, attitude, r) {
+            const bank = Math.max(-45, Math.min(45, attitude.bank || 0));
+            const turnRate = Math.max(-4, Math.min(4, attitude.turnRate || 0));
+            const bankNeedle = (bank - 90) * Math.PI / 180;
+            const turnNeedle = (turnRate / 4) * 70;
+
+            ctx.strokeStyle = 'rgba(226,232,240,.75)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(0, 0, 72, Math.PI * 1.15, Math.PI * 1.85);
+            ctx.stroke();
+            [-30, -15, 0, 15, 30].forEach(deg => {
+                const a = (deg - 90) * Math.PI / 180;
+                const inner = deg === 0 ? 42 : 54;
+                ctx.beginPath();
+                ctx.moveTo(Math.cos(a) * inner, Math.sin(a) * inner);
+                ctx.lineTo(Math.cos(a) * 72, Math.sin(a) * 72);
+                ctx.stroke();
+            });
+
+            ctx.strokeStyle = '#38bdf8';
+            ctx.lineWidth = 5;
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.lineTo(Math.cos(bankNeedle) * 64, Math.sin(bankNeedle) * 64);
+            ctx.stroke();
+            ctx.fillStyle = '#e5e7eb';
+            ctx.beginPath();
+            ctx.arc(0, 0, 7, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.strokeStyle = 'rgba(148, 163, 184, .8)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(-58, 44);
+            ctx.lineTo(58, 44);
+            ctx.stroke();
+            ctx.fillStyle = '#facc15';
+            ctx.beginPath();
+            ctx.roundRect(turnNeedle - 6, 36, 12, 16, 4);
+            ctx.fill();
+
+            ctx.fillStyle = '#f8fafc';
+            ctx.font = '700 15px JetBrains Mono, monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(`${bank >= 0 ? 'R' : 'L'} ${Math.abs(Math.round(bank))}°`, 0, 20);
+            ctx.fillStyle = '#cbd5e1';
+            ctx.font = '10px JetBrains Mono, monospace';
+            ctx.fillText(`${turnRate >= 0 ? 'R' : 'L'} ${Math.abs(turnRate).toFixed(1)}°/s`, 0, 64);
+        }
+
+        function drawFlightPathGauge(ctx, flightPath, r) {
+            ctx.strokeStyle = 'rgba(148,163,184,.35)';
+            ctx.lineWidth = 1;
+            for (let degrees = -10; degrees <= 10; degrees += 5) {
+                const y = -degrees * 6;
+                ctx.beginPath();
+                ctx.moveTo(-68, y);
+                ctx.lineTo(68, y);
+                ctx.stroke();
+                ctx.fillStyle = '#94a3b8';
+                ctx.font = '10px JetBrains Mono, monospace';
+                ctx.textAlign = 'right';
+                ctx.fillText(`${degrees > 0 ? '+' : ''}${degrees}°`, -72, y + 3);
+            }
+
+            const y = -flightPath.angle * 6;
+            ctx.strokeStyle = '#38bdf8';
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(-48, y);
+            ctx.lineTo(-14, y);
+            ctx.moveTo(14, y);
+            ctx.lineTo(48, y);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.arc(0, y, 8, 0, Math.PI * 2);
+            ctx.stroke();
+
+            ctx.fillStyle = '#f8fafc';
+            ctx.font = '700 16px JetBrains Mono, monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(`${flightPath.angle >= 0 ? '+' : ''}${flightPath.angle.toFixed(1)}°`, 0, 34);
+            ctx.fillStyle = '#cbd5e1';
+            ctx.font = '10px JetBrains Mono, monospace';
+            ctx.fillText(`${Math.round(flightPath.climbGradient).toLocaleString()} ft/nm`, 0, 50);
+            ctx.fillText(`E ${Math.round(flightPath.totalEnergyKts)} kt · 1m ${Math.round(flightPath.altitudeTrend).toLocaleString()} ft`, 0, 64);
+        }
+
+        function drawHeadingIndicator(ctx, heading, r) {
+            ctx.save(); ctx.rotate(-heading * Math.PI / 180);
+            for (let d = 0; d < 360; d += 10) { const a = d * Math.PI / 180 - Math.PI / 2; const major = d % 30 === 0; ctx.strokeStyle = '#e5e7eb'; ctx.lineWidth = major ? 3 : 1; ctx.beginPath(); ctx.moveTo(Math.cos(a)*(r-14), Math.sin(a)*(r-14)); ctx.lineTo(Math.cos(a)*(r-(major?30:22)), Math.sin(a)*(r-(major?30:22))); ctx.stroke(); if (major) { ctx.save(); ctx.translate(Math.cos(a)*(r-45), Math.sin(a)*(r-45)); ctx.rotate(heading * Math.PI / 180); ctx.fillStyle = '#e5e7eb'; ctx.font = '13px JetBrains Mono, monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(d === 0 ? 'N' : d === 90 ? 'E' : d === 180 ? 'S' : d === 270 ? 'W' : String(d/10), 0, 0); ctx.restore(); } }
+            ctx.restore(); ctx.fillStyle = '#ef4444'; ctx.beginPath(); ctx.moveTo(0, -82); ctx.lineTo(-8, -62); ctx.lineTo(8, -62); ctx.closePath(); ctx.fill(); ctx.fillStyle = '#f8fafc'; ctx.font = '700 20px JetBrains Mono, monospace'; ctx.textAlign = 'center'; ctx.fillText(String(Math.round(heading)).padStart(3,'0') + '°', 0, 12);
+        }
+
+        function drawAltimeter(ctx, altitude, r) {
+            drawRoundScale(ctx, { value: altitude % 1000, min: 0, max: 1000, major: 100, type: 'alt', showValue: false }, r);
+            drawNeedle(ctx, 135 * Math.PI / 180 + ((altitude % 10000) / 10000) * 270 * Math.PI / 180, r - 58, '#38bdf8');
+            ctx.fillStyle = '#f8fafc'; ctx.font = '700 17px JetBrains Mono, monospace'; ctx.textAlign = 'center'; ctx.fillText(Math.round(altitude).toLocaleString(), 0, 34);
+        }
+
+        function renderCockpitTrafficList(traffic) {
+            const list = document.getElementById('cockpit-traffic-list');
+            if (!list) return;
+            const visibleTraffic = traffic.slice(0, 3);
+            if (visibleTraffic.length === 0) {
+                list.innerHTML = '<span class="text-emerald-400">No nearby traffic inside simulated forward range.</span>';
+                return;
+            }
+            list.innerHTML = visibleTraffic.map(({ plane, distance, relativeBearing, altitudeDelta, closureRate }) => {
+                const label = (plane.flight || plane.hex || 'UNKNOWN').trim();
+                const status = plane.isEmergency ? 'EMERG' : (plane.isMilitary ? 'MIL' : 'TRAFFIC');
+                const side = relativeBearing > 8 ? 'R' : (relativeBearing < -8 ? 'L' : 'AHEAD');
+                const altitudeText = `${altitudeDelta >= 0 ? '+' : '-'}${Math.round(Math.abs(altitudeDelta) / 100)}00ft`;
+                const closureText = closureRate > 80 ? 'closing' : (closureRate < -80 ? 'opening' : 'steady');
+                return `<span class="inline-block mr-2 mb-1"><strong class="text-slate-200">${label}</strong> ${side} ${distance.toFixed(1)}mi ${altitudeText} ${closureText} <em class="text-radar-glow not-italic">${status}</em></span>`;
+            }).join('');
         }
 
         // Visual Marker Mapping synchronize routine
@@ -1471,7 +2042,7 @@
                 // while high altitude targets are compressed beautifully within the 180px limit.
                 const stalkHeight = plane.alt_baro === "ground" ? 0 : Math.min(0.9 * Math.sqrt(altitude), 180);
 
-                const planeIconHtml = get2_5DMarkerHTML(plane, colorTheme, stalkHeight);
+                const planeIconHtml = get2_5DMarkerHTML(plane, colorTheme, stalkHeight, activeSelectedHex === plane.hex);
                 
                 // 2.5D Marker Container bounds. Anchor is mathematically set to exact bottom center.
                 const customDivIcon = L.divIcon({
@@ -1482,7 +2053,7 @@
                 });
 
                 // Z-index calculation to force higher planes to render OVER lower planes visually
-                const altZIndex = altitude > 0 ? 1000 + Math.floor(altitude / 10) : 100;
+                const altZIndex = (altitude > 0 ? 1000 + Math.floor(altitude / 10) : 100) + (activeSelectedHex === plane.hex ? 100000 : 0);
 
                 if (mapMarkers[plane.hex]) {
                     // Update positional lat/lon, bearing, and altitude cleanly
@@ -1510,16 +2081,30 @@
             activeSelectedHex = hex;
             
             // Highlight list selection
-            renderListPanel(aircraftList);
+            renderListPanel(lastRenderedPlanes);
             
             const plane = aircraftList.find(p => p.hex === hex);
             if (plane) showHUD(plane);
+            syncMapMarkers(lastRenderedPlanes);
 
             // Fetch specific marker instance to pan
             const marker = mapMarkers[hex];
             if (marker && panMap) {
                 map.setView(marker.getLatLng(), 11, { animate: true });
             }
+        }
+
+        function getBearingDegrees(lat1, lon1, lat2, lon2) {
+            const phi1 = lat1 * Math.PI / 180;
+            const phi2 = lat2 * Math.PI / 180;
+            const lambdaDelta = (lon2 - lon1) * Math.PI / 180;
+            const y = Math.sin(lambdaDelta) * Math.cos(phi2);
+            const x = Math.cos(phi1) * Math.sin(phi2) - Math.sin(phi1) * Math.cos(phi2) * Math.cos(lambdaDelta);
+            return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+        }
+
+        function normalizeAngle(degrees) {
+            return ((degrees + 540) % 360) - 180;
         }
 
         // Mathematical Haversine standard formula for perfect distance calculations (Statute Miles)
