@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SkyRadar - Tactical ADS-B Flight Tracker</title>
+    <title>SkyRadar - Tactical ADS-B & AIS Tracker</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -225,9 +225,9 @@
             </div>
             <div>
                 <h1 class="text-lg font-bold tracking-tight text-white flex items-center gap-2">
-                    SkyRadar <span class="text-xs bg-radar-glow/20 text-radar-glow px-2 py-0.5 rounded border border-radar-glow/30">ADS-B LIVE</span>
+                    SkyRadar <span class="text-xs bg-radar-glow/20 text-radar-glow px-2 py-0.5 rounded border border-radar-glow/30">ADS-B + AIS LIVE</span>
                 </h1>
-                <p class="text-xs text-slate-400">Tactical Air Traffic Surveillance</p>
+                <p class="text-xs text-slate-400">Tactical Air & Maritime Surveillance</p>
             </div>
         </div>
 
@@ -262,6 +262,12 @@
                 <button id="btn-zoom-out" class="px-3.5 py-1 text-slate-300 hover:text-white hover:bg-slate-700 border-r border-slate-700 font-bold text-lg transition-colors focus:outline-none" title="Zoom Out">−</button>
                 <button id="btn-zoom-in" class="px-3.5 py-1 text-slate-300 hover:text-white hover:bg-slate-700 font-bold text-lg transition-colors focus:outline-none" title="Zoom In">+</button>
             </div>
+
+            <!-- AISstream.io Shipping Toggle -->
+            <button id="btn-ais-toggle" class="bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all" title="Enable AISstream.io vessel overlays with your own API key">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 15a4 4 0 004 4h10a4 4 0 004-4M4 15l2-7h12l2 7M8 8V5h8v3"/></svg>
+                <span id="ais-toggle-text">AIS Ships OFF</span>
+            </button>
 
             <!-- Manual Coordinate Override Button -->
             <button id="btn-manual-loc" class="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all">
@@ -309,7 +315,7 @@
                     <!-- Stats Badges -->
                     <div class="grid grid-cols-4 gap-2 text-center text-xs">
                         <div class="bg-slate-950/70 rounded-lg p-2 border border-slate-800">
-                            <div class="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">In Range</div>
+                            <div class="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Targets</div>
                             <div id="stat-total" class="text-base font-bold text-white mono">0</div>
                         </div>
                         <div class="bg-slate-950/70 rounded-lg p-2 border border-slate-800">
@@ -361,7 +367,7 @@
                 <div id="aircraft-list" class="flex-grow overflow-y-auto divide-y divide-radar-border/40 bg-slate-950/20">
                     <div id="list-placeholder" class="py-12 px-4 text-center space-y-3">
                         <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-radar-glow"></div>
-                        <p class="text-sm text-slate-400">Searching airspace skies near you...</p>
+                        <p class="text-sm text-slate-400">Searching airspace and waterways near you...</p>
                     </div>
                 </div>
             </div>
@@ -400,7 +406,7 @@
 
             <!-- Powered and status footnote -->
             <div class="bg-radar-dark border-t border-radar-border p-2 px-4 flex justify-between items-center text-[10px] text-slate-500">
-                <span>Data source: <a href="https://airplanes.live" target="_blank" class="text-radar-glow hover:underline">airplanes.live Open API</a></span>
+                <span>Data sources: <a href="https://airplanes.live" target="_blank" class="text-radar-glow hover:underline">airplanes.live</a> + <a href="https://aisstream.io" target="_blank" class="text-cyan-300 hover:underline">AISstream.io</a></span>
                 <span id="last-updated-tag" class="mono">Never Updated</span>
             </div>
         </section>
@@ -622,8 +628,13 @@
         let userMarker = null;
         let radarCircle = null;
         let aircraftList = [];
+        let shipList = [];
         let lastRenderedPlanes = [];
-        let mapMarkers = {}; // Map of hex codes to leaflet markers
+        let mapMarkers = {}; // Map of target IDs to leaflet markers
+        let shipMarkers = {};
+        let aisSocket = null;
+        let aisApiKey = localStorage.getItem('skyradar_aisstream_api_key') || '';
+        let aisEnabled = localStorage.getItem('skyradar_aisstream_enabled') === 'true';
         let currentFilters = {
             search: '',
             milOnly: false,
@@ -641,6 +652,30 @@
         const cockpitRunwayRequests = new Set();
         const cockpitRunwayEndpoint = 'https://overpass-api.de/api/interpreter';
         const cockpitTrackHistory = {};
+
+        function getShipId(ship) {
+            return `ship-${ship.mmsi || ship.id}`;
+        }
+
+        function getShipMarkerHTML(ship, isSelected = false) {
+            const heading = Number.isFinite(ship.heading) ? ship.heading : (Number.isFinite(ship.course) ? ship.course : 0);
+            const name = ship.name || `MMSI ${ship.mmsi || 'UNKNOWN'}`;
+            const speed = Number.isFinite(ship.speed) ? `${ship.speed.toFixed(1)} KTS` : 'AIS';
+            return `
+                <div class="${isSelected ? 'selected-plane-target' : ''}" style="position: relative; width: 180px; height: 86px; pointer-events: none;">
+                    <div style="position:absolute; left:78px; bottom:0; width:24px; height:34px; pointer-events:auto; cursor:pointer; filter: drop-shadow(0 5px 7px rgba(0,0,0,.8));">
+                        <svg viewBox="0 0 64 96" style="width:24px;height:34px;transform:rotate(${Math.round(heading)}deg);transform-origin:center;">
+                            <path d="M32 4 54 38 45 86H19L10 38Z" fill="#22d3ee" stroke="#ecfeff" stroke-width="4"/>
+                            <path d="M21 44h22M24 60h16" stroke="#083344" stroke-width="5" stroke-linecap="round"/>
+                        </svg>
+                    </div>
+                    <div class="aircraft-label" style="position:absolute;left:104px;bottom:11px;background:rgba(8,47,73,.82);backdrop-filter:blur(4px);border-left:2px solid #22d3ee;padding:3px 6px;border-radius:0 6px 6px 0;color:#ecfeff;font-family:'JetBrains Mono',monospace;line-height:1.2;box-shadow:0 4px 6px rgba(0,0,0,.3);pointer-events:auto;cursor:pointer;white-space:nowrap;z-index:4;">
+                        <div style="font-weight:700;font-size:11px;letter-spacing:.5px;">${name}</div>
+                        <div style="color:#bae6fd;font-size:9px;margin-top:1px;">${speed} <span style="opacity:.5">|</span> ${ship.calculatedDistance.toFixed(1)} MI</div>
+                    </div>
+                </div>`;
+        }
+
         // Custom SVGs for crisp 2.5D Parallax Markers
         function get2_5DMarkerHTML(plane, colorTheme, stalkHeight, isSelected = false) {
             const rotAngle = plane.track !== undefined && plane.track !== null ? Math.round(plane.track) : 0;
@@ -917,6 +952,11 @@
                 injectDemoTargets();
             });
 
+            document.getElementById('btn-ais-toggle').addEventListener('click', () => {
+                toggleAisStream();
+            });
+            updateAisToggleUI();
+
             // Search Input listener
             document.getElementById('search-input').addEventListener('input', (e) => {
                 currentFilters.search = e.target.value.trim().toLowerCase();
@@ -928,6 +968,7 @@
                 activeRadius = parseInt(e.target.value, 10);
                 logger.add(`Recalibrating scanner sweep radius to: ${activeRadius} miles.`, "info");
                 updateMapContext();
+                reconnectAisStream();
                 pollRadarSkies();
                 showNotification('Radar recalibration', `Radius range expanded to ${activeRadius} miles.`, 'info');
             });
@@ -1024,6 +1065,7 @@
 
                 logger.add(`Relocated tactical station center to coordinate [${latInput}, ${lonInput}]`, "success");
                 showNotification('Radar Tuned', `Ground tracking center adjusted to [${userLocation.lat.toFixed(4)}, ${userLocation.lon.toFixed(4)}]`, 'success');
+                reconnectAisStream();
                 pollRadarSkies();
             });
 
@@ -1173,6 +1215,9 @@
                     document.getElementById('radar-lbl-status').innerText = 'Nominal';
                     document.getElementById('radar-lbl-status').className = 'text-emerald-400 font-bold';
                 }
+
+                // AISstream is a live WebSocket feed; keep its bounding box aligned with the same radar range.
+                if (aisEnabled && !aisSocket) connectAisStream();
 
                 // Display lists and plot targets onto interactive Leaflet map
                 renderFilteredState();
@@ -1357,9 +1402,130 @@
             document.getElementById('tab-aircraft').click();
         }
 
+
+        function updateAisToggleUI() {
+            const label = document.getElementById('ais-toggle-text');
+            const button = document.getElementById('btn-ais-toggle');
+            if (!label || !button) return;
+            label.innerText = aisEnabled ? 'AIS Ships ON' : 'AIS Ships OFF';
+            button.classList.toggle('bg-cyan-500/20', aisEnabled);
+            button.classList.toggle('text-cyan-100', aisEnabled);
+        }
+
+        function toggleAisStream() {
+            if (!aisEnabled && !aisApiKey) {
+                const enteredKey = window.prompt('Enter your AISstream.io API key. It will be stored only in this browser localStorage.');
+                if (!enteredKey) {
+                    showNotification('AIS Not Enabled', 'AISstream.io requires your own API key to open the live ship feed.', 'warning');
+                    return;
+                }
+                aisApiKey = enteredKey.trim();
+                localStorage.setItem('skyradar_aisstream_api_key', aisApiKey);
+            }
+            aisEnabled = !aisEnabled;
+            localStorage.setItem('skyradar_aisstream_enabled', String(aisEnabled));
+            updateAisToggleUI();
+            if (aisEnabled) {
+                connectAisStream();
+                showNotification('AIS Enabled', 'Listening for AISstream.io vessels inside the current radar range.', 'success');
+            } else {
+                disconnectAisStream();
+                shipList = [];
+                syncShipMarkers([]);
+                renderFilteredState();
+                showNotification('AIS Disabled', 'Ship overlays have been removed from the map.', 'info');
+            }
+        }
+
+        function reconnectAisStream() {
+            if (!aisEnabled) return;
+            disconnectAisStream(false);
+            shipList = [];
+            syncShipMarkers([]);
+            connectAisStream();
+        }
+
+        function disconnectAisStream(clearHandlers = true) {
+            if (!aisSocket) return;
+            if (clearHandlers) {
+                aisSocket.onopen = null;
+                aisSocket.onmessage = null;
+                aisSocket.onerror = null;
+                aisSocket.onclose = null;
+            }
+            aisSocket.close();
+            aisSocket = null;
+        }
+
+        function connectAisStream() {
+            if (!aisEnabled || !aisApiKey || aisSocket) return;
+            try {
+                const bounds = getRadarBoundingBox(userLocation.lat, userLocation.lon, activeRadius);
+                aisSocket = new WebSocket('wss://stream.aisstream.io/v0/stream');
+                aisSocket.onopen = () => {
+                    aisSocket.send(JSON.stringify({
+                        APIKey: aisApiKey,
+                        BoundingBoxes: [[[bounds.minLat, bounds.minLon], [bounds.maxLat, bounds.maxLon]]],
+                        FilterMessageTypes: ['PositionReport']
+                    }));
+                    logger.add(`AISstream.io vessel feed subscribed for ${activeRadius} mi radar range.`, 'success');
+                };
+                aisSocket.onmessage = (event) => {
+                    const payload = JSON.parse(event.data);
+                    const ship = normalizeAisMessage(payload);
+                    if (!ship || ship.calculatedDistance > activeRadius) return;
+                    upsertShip(ship);
+                    renderFilteredState();
+                };
+                aisSocket.onerror = () => logger.add('AISstream.io WebSocket reported an error. Verify your API key and browser WebSocket access.', 'warning');
+                aisSocket.onclose = () => {
+                    aisSocket = null;
+                    if (aisEnabled) logger.add('AISstream.io vessel feed closed. It will reconnect on the next radar refresh or range change.', 'warning');
+                };
+            } catch (error) {
+                logger.add(`AISstream.io setup failed: ${error.message}`, 'error', error);
+                aisSocket = null;
+            }
+        }
+
+        function normalizeAisMessage(payload) {
+            const report = payload?.Message?.PositionReport;
+            if (!report) return null;
+            const metadata = payload.MetaData || payload.Metadata || {};
+            const lat = Number(report.Latitude ?? metadata.latitude ?? metadata.Latitude);
+            const lon = Number(report.Longitude ?? metadata.longitude ?? metadata.Longitude);
+            if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+            const mmsi = String(report.UserID ?? metadata.MMSI ?? metadata.Mmsi ?? '').trim();
+            const name = (metadata.ShipName || metadata.ship_name || '').trim();
+            return { id: mmsi || `${lat.toFixed(5)},${lon.toFixed(5)}`, mmsi, name, lat, lon, speed: Number(report.Sog), course: Number(report.Cog), heading: Number(report.TrueHeading), navStatus: report.NavigationalStatus, calculatedDistance: getHaversineDistance(userLocation.lat, userLocation.lon, lat, lon), lastSeen: Date.now() };
+        }
+
+        function upsertShip(ship) {
+            const cutoff = Date.now() - 15 * 60 * 1000;
+            shipList = shipList.filter(existing => existing.lastSeen >= cutoff && getShipId(existing) !== getShipId(ship));
+            shipList.push(ship);
+        }
+
+        function getRadarBoundingBox(lat, lon, radiusMiles) {
+            const latDelta = radiusMiles / 69;
+            const lonDelta = radiusMiles / (69 * Math.max(Math.cos(lat * Math.PI / 180), 0.01));
+            return { minLat: Math.max(-90, lat - latDelta), minLon: Math.max(-180, lon - lonDelta), maxLat: Math.min(90, lat + latDelta), maxLon: Math.min(180, lon + lonDelta) };
+        }
+
         // Apply filters & render aircraft list and markers
         function renderFilteredState() {
             // Filter array
+            let filteredShips = shipList.filter(ship => {
+                if (ship.lat === undefined || ship.lon === undefined) return false;
+                if (ship.calculatedDistance > activeRadius) return false;
+                if (currentFilters.search) {
+                    const haystack = `${ship.name || ''} ${ship.mmsi || ''}`.toLowerCase();
+                    if (!haystack.includes(currentFilters.search)) return false;
+                }
+                if (currentFilters.milOnly || currentFilters.emergencyOnly || currentFilters.groundOnly || currentFilters.airborneOnly) return false;
+                return true;
+            });
+
             let filtered = aircraftList.filter(plane => {
                 // Ignore planes with missing essential coordinate metrics
                 if (plane.lat === undefined || plane.lon === undefined) return false;
@@ -1404,13 +1570,14 @@
             lastRenderedPlanes = filtered;
 
             // Render stats bar on side panel
-            updateStatisticsDisplay(filtered);
+            updateStatisticsDisplay(filtered, filteredShips);
 
             // Re-render side panel HTML
-            renderListPanel(filtered);
+            renderListPanel(filtered, filteredShips);
 
             // Sync visual targets mapped onto the Leaflet Canvas
             syncMapMarkers(filtered);
+            syncShipMarkers(filteredShips);
             
             // Ensure HUD remains updated with live moving data if a target is actively selected
             if (activeSelectedHex) {
@@ -1424,8 +1591,8 @@
         }
 
         // Helper calculations for visual stats indicators
-        function updateStatisticsDisplay(planes) {
-            document.getElementById('stat-total').innerText = planes.length;
+        function updateStatisticsDisplay(planes, ships = []) {
+            document.getElementById('stat-total').innerText = planes.length + ships.length;
             
             const milCount = planes.filter(p => p.isMilitary).length;
             document.getElementById('stat-military').innerText = milCount;
@@ -1445,21 +1612,43 @@
         }
 
         // Generate side list cards HTML
-        function renderListPanel(planes) {
+        function renderListPanel(planes, ships = []) {
             const listContainer = document.getElementById('aircraft-list');
             
-            if (planes.length === 0) {
+            if (planes.length === 0 && ships.length === 0) {
                 listContainer.innerHTML = `
                     <div class="py-16 px-4 text-center space-y-2">
                         <svg class="w-10 h-10 text-slate-600 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
-                        <p class="text-sm font-semibold text-slate-300">No Aircraft Located</p>
-                        <p class="text-xs text-slate-500">Try zooming out the scanner radius or adjustment controls to active airspaces.</p>
+                        <p class="text-sm font-semibold text-slate-300">No Targets Located</p>
+                        <p class="text-xs text-slate-500">Try zooming out the scanner radius, enabling AIS ships, or adjusting controls to active airspaces/waterways.</p>
                     </div>
                 `;
                 return;
             }
 
             let htmlString = '';
+            ships.forEach(ship => {
+                const shipId = getShipId(ship);
+                const name = ship.name || `MMSI ${ship.mmsi || 'Unknown'}`;
+                const speed = Number.isFinite(ship.speed) ? `${ship.speed.toFixed(1)} kts` : 'N/A';
+                const heading = Number.isFinite(ship.heading) && ship.heading < 511 ? `${Math.round(ship.heading)}°` : (Number.isFinite(ship.course) ? `${Math.round(ship.course)}°` : 'N/A');
+                htmlString += `
+                    <div class="p-3.5 hover:bg-cyan-950/30 border-l-4 border-cyan-400/70 transition-all cursor-pointer" onclick="focusOnShip('${shipId}', true)">
+                        <div class="flex items-center justify-between gap-2 mb-1.5">
+                            <div class="flex items-center gap-2">
+                                <span class="text-sm font-bold text-cyan-100 uppercase tracking-wide mono">${name}</span>
+                                <span class="text-xs text-cyan-200 font-mono text-[10px] bg-cyan-950 px-1 rounded">${ship.mmsi || 'AIS'}</span>
+                            </div>
+                            <span class="text-xs font-semibold text-cyan-200 bg-cyan-500/10 px-2 py-0.5 rounded-full border border-cyan-500/20">${ship.calculatedDistance.toFixed(1)} miles</span>
+                        </div>
+                        <div class="grid grid-cols-3 gap-2 text-xs text-slate-400">
+                            <div><span class="block text-[10px] text-slate-500 uppercase tracking-tight">Target</span><strong class="text-cyan-300 block truncate">AIS Vessel</strong></div>
+                            <div><span class="block text-[10px] text-slate-500 uppercase tracking-tight">Speed</span><strong class="text-slate-300 block truncate">${speed}</strong></div>
+                            <div><span class="block text-[10px] text-slate-500 uppercase tracking-tight">Heading</span><strong class="text-slate-300 block truncate">${heading}</strong></div>
+                        </div>
+                    </div>`;
+            });
+
             planes.forEach(plane => {
                 const callsign = (plane.flight || 'N/A').trim();
                 const typeCode = plane.t || 'Unknown';
@@ -2231,6 +2420,61 @@
                     mapMarkers[plane.hex] = marker;
                 }
             });
+        }
+
+
+        function syncShipMarkers(activeShips) {
+            const currentShipIds = new Set(activeShips.map(getShipId));
+            Object.keys(shipMarkers).forEach(id => {
+                if (!currentShipIds.has(id)) {
+                    map.removeLayer(shipMarkers[id]);
+                    delete shipMarkers[id];
+                }
+            });
+
+            activeShips.forEach(ship => {
+                const id = getShipId(ship);
+                const coord = [ship.lat, ship.lon];
+                const icon = L.divIcon({
+                    className: 'custom-ship-marker',
+                    html: getShipMarkerHTML(ship, false),
+                    iconSize: [180, 86],
+                    iconAnchor: [90, 86]
+                });
+                if (shipMarkers[id]) {
+                    shipMarkers[id].setLatLng(coord);
+                    shipMarkers[id].setIcon(icon);
+                } else {
+                    const marker = L.marker(coord, { icon, zIndexOffset: 500 }).addTo(map);
+                    marker.on('click', (e) => {
+                        L.DomEvent.stopPropagation(e);
+                        focusOnShip(id, false);
+                    });
+                    shipMarkers[id] = marker;
+                }
+            });
+        }
+
+        function focusOnShip(id, panMap = true) {
+            const ship = shipList.find(s => getShipId(s) === id);
+            if (!ship) return;
+            hideHUD();
+            const hud = document.getElementById('hud-overlay');
+            const speed = Number.isFinite(ship.speed) ? `${ship.speed.toFixed(1)} kts` : 'N/A';
+            const heading = Number.isFinite(ship.heading) && ship.heading < 511 ? `${Math.round(ship.heading)}°` : (Number.isFinite(ship.course) ? `${Math.round(ship.course)}°` : 'N/A');
+            hud.innerHTML = `
+                <div class="flex items-start justify-between gap-4 mb-3">
+                    <div><p class="text-[10px] uppercase tracking-[0.18em] text-cyan-300 font-bold">AIS Vessel</p><h3 class="text-lg font-bold text-white mono">${ship.name || `MMSI ${ship.mmsi || 'UNKNOWN'}`}</h3></div>
+                    <button onclick="hideHUD()" class="text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-full w-6 h-6 flex items-center justify-center transition-colors">✕</button>
+                </div>
+                <div class="grid grid-cols-2 gap-3 text-xs">
+                    <div class="bg-slate-950/70 rounded-lg p-2 border border-slate-800"><span class="block text-slate-500 uppercase text-[9px]">MMSI</span><strong class="text-cyan-200 mono">${ship.mmsi || 'N/A'}</strong></div>
+                    <div class="bg-slate-950/70 rounded-lg p-2 border border-slate-800"><span class="block text-slate-500 uppercase text-[9px]">Distance</span><strong class="text-cyan-200 mono">${ship.calculatedDistance.toFixed(1)} mi</strong></div>
+                    <div class="bg-slate-950/70 rounded-lg p-2 border border-slate-800"><span class="block text-slate-500 uppercase text-[9px]">Speed</span><strong class="text-white mono">${speed}</strong></div>
+                    <div class="bg-slate-950/70 rounded-lg p-2 border border-slate-800"><span class="block text-slate-500 uppercase text-[9px]">Heading</span><strong class="text-white mono">${heading}</strong></div>
+                </div>`;
+            hud.classList.remove('hidden');
+            if (panMap && shipMarkers[id]) map.setView(shipMarkers[id].getLatLng(), 11, { animate: true });
         }
 
         // Detailed targeting visual focus helper
