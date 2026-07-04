@@ -2132,16 +2132,6 @@
             ctx.fill();
             ctx.stroke();
             ctx.restore();
-
-            const label = (ship.name || `MMSI ${ship.mmsi || 'AIS'}`).trim().slice(0, 12);
-            const speed = Number.isFinite(ship.speed) ? `${ship.speed.toFixed(1)}kt` : 'AIS';
-            ctx.fillStyle = '#67e8f9';
-            ctx.font = '700 16px JetBrains Mono, monospace';
-            ctx.textAlign = 'left';
-            ctx.fillText(label, x + 14, y - 8);
-            ctx.fillStyle = '#cffafe';
-            ctx.font = '13px JetBrains Mono, monospace';
-            ctx.fillText(`${distance.toFixed(1)}mi ${speed}`, x + 14, y + 10);
         }
 
         function drawHudTraffic(ctx, width, height, item, heading) {
@@ -2164,16 +2154,6 @@
             ctx.closePath();
             ctx.fill();
             ctx.restore();
-
-            const altText = `${altitudeDelta >= 0 ? '+' : '-'}${Math.round(Math.abs(altitudeDelta) / 100).toString().padStart(2, '0')}`;
-            const trend = closureRate > 80 ? '▲' : closureRate < -80 ? '▼' : '•';
-            ctx.fillStyle = color;
-            ctx.font = '700 18px JetBrains Mono, monospace';
-            ctx.textAlign = 'left';
-            ctx.fillText((plane.flight || plane.hex || 'UNK').trim().slice(0, 8), x + 14, y - 12);
-            ctx.fillStyle = '#e2e8f0';
-            ctx.font = '14px JetBrains Mono, monospace';
-            ctx.fillText(`${distance.toFixed(1)}mi ${altText} ${trend}`, x + 14, y + 8);
         }
 
         function getPlaneAltitudeFeet(plane) {
