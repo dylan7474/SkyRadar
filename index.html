@@ -1470,12 +1470,19 @@
                     }));
                     logger.add(`AISstream.io vessel feed subscribed for ${activeRadius} mi radar range.`, 'success');
                 };
-                aisSocket.onmessage = (event) => {
-                    const payload = JSON.parse(event.data);
-                    const ship = normalizeAisMessage(payload);
-                    if (!ship || ship.calculatedDistance > activeRadius) return;
-                    upsertShip(ship);
-                    renderFilteredState();
+                aisSocket.onmessage = async (event) => {
+                    try {
+                        const payload = await parseAisMessageData(event.data);
+                        const ship = normalizeAisMessage(payload);
+                        if (!ship || ship.calculatedDistance > activeRadius) return;
+                        upsertShip(ship);
+                        renderFilteredState();
+                    } catch (error) {
+                        logger.add(`AISstream.io message could not be decoded: ${error.message}`, 'warning', {
+                            dataType: Object.prototype.toString.call(event.data),
+                            error
+                        });
+                    }
                 };
                 aisSocket.onerror = () => logger.add('AISstream.io WebSocket reported an error. Verify your API key and browser WebSocket access.', 'warning');
                 aisSocket.onclose = () => {
@@ -1486,6 +1493,24 @@
                 logger.add(`AISstream.io setup failed: ${error.message}`, 'error', error);
                 aisSocket = null;
             }
+        }
+
+
+        async function parseAisMessageData(data) {
+            let textPayload;
+            if (typeof data === 'string') {
+                textPayload = data;
+            } else if (data instanceof Blob) {
+                textPayload = await data.text();
+            } else if (data instanceof ArrayBuffer) {
+                textPayload = new TextDecoder().decode(data);
+            } else if (ArrayBuffer.isView(data)) {
+                textPayload = new TextDecoder().decode(data);
+            } else {
+                throw new TypeError(`Unsupported AISstream.io message payload type: ${Object.prototype.toString.call(data)}`);
+            }
+
+            return JSON.parse(textPayload);
         }
 
         function normalizeAisMessage(payload) {
