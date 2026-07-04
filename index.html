@@ -1814,9 +1814,27 @@
                 .filter(item => item.distance <= cockpitRangeMiles)
                 .sort((a, b) => a.distance - b.distance);
 
-            drawCockpitCanvas(canvas, selectedPlane, traffic, heading, runways);
+            const shipsInView = getCockpitShipsInView(selectedPlane, heading);
+            document.getElementById('cockpit-range').innerText = `RANGE ${cockpitRangeMiles} MI${shipsInView.length ? ` · ${shipsInView.length} AIS` : ''}`;
+
+            drawCockpitCanvas(canvas, selectedPlane, traffic, heading, runways, shipsInView);
             drawCockpitInstruments(selectedPlane);
             cockpit.classList.remove('hidden');
+        }
+
+
+        function getCockpitShipsInView(selectedPlane, heading) {
+            return shipList
+                .filter(ship => ship.lat !== undefined && ship.lon !== undefined)
+                .map(ship => {
+                    const distance = getHaversineDistance(selectedPlane.lat, selectedPlane.lon, ship.lat, ship.lon);
+                    const bearing = getBearingDegrees(selectedPlane.lat, selectedPlane.lon, ship.lat, ship.lon);
+                    const relativeBearing = normalizeAngle(bearing - heading);
+                    return { ship, distance, bearing, relativeBearing };
+                })
+                .filter(item => item.distance <= cockpitRangeMiles && Math.abs(item.relativeBearing) <= 100)
+                .sort((a, b) => a.distance - b.distance)
+                .slice(0, 8);
         }
 
         function estimateClosureRate(ownship, trafficPlane, bearingToTraffic) {
@@ -1829,7 +1847,7 @@
             return ownTowardTraffic + trafficTowardOwnship;
         }
 
-        function drawCockpitCanvas(canvas, selectedPlane, traffic, heading, runways = []) {
+        function drawCockpitCanvas(canvas, selectedPlane, traffic, heading, runways = [], shipsInView = []) {
             const ctx = canvas.getContext('2d');
             const width = canvas.width;
             const height = canvas.height;
@@ -1841,6 +1859,7 @@
             drawHudCompassTape(ctx, width, heading);
             drawHudTrafficScope(ctx, width, height);
 
+            shipsInView.forEach(item => drawHudShip(ctx, width, height, item, heading));
             traffic.forEach(item => drawHudTraffic(ctx, width, height, item, heading));
 
             drawOwnshipSymbol(ctx, width, height);
@@ -2084,6 +2103,45 @@
             ctx.closePath();
             ctx.fill();
             ctx.stroke();
+        }
+
+
+        function drawHudShip(ctx, width, height, item, heading) {
+            const { ship, distance, relativeBearing } = item;
+            const depth = Math.max(0, 1 - distance / cockpitRangeMiles);
+            const x = width / 2 + (relativeBearing / 100) * (width * 0.44);
+            const y = height - 72 - depth * 118;
+            const size = 9 + depth * 8;
+            const shipHeading = Number.isFinite(ship.heading) && ship.heading < 511
+                ? ship.heading
+                : (Number.isFinite(ship.course) ? ship.course : heading + relativeBearing);
+
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.rotate(normalizeAngle(shipHeading - heading) * Math.PI / 180);
+            ctx.fillStyle = 'rgba(34, 211, 238, 0.92)';
+            ctx.strokeStyle = '#ecfeff';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(0, -size * 1.25);
+            ctx.lineTo(size * 0.92, size * 0.15);
+            ctx.lineTo(size * 0.55, size * 1.15);
+            ctx.lineTo(-size * 0.55, size * 1.15);
+            ctx.lineTo(-size * 0.92, size * 0.15);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+            ctx.restore();
+
+            const label = (ship.name || `MMSI ${ship.mmsi || 'AIS'}`).trim().slice(0, 12);
+            const speed = Number.isFinite(ship.speed) ? `${ship.speed.toFixed(1)}kt` : 'AIS';
+            ctx.fillStyle = '#67e8f9';
+            ctx.font = '700 16px JetBrains Mono, monospace';
+            ctx.textAlign = 'left';
+            ctx.fillText(label, x + 14, y - 8);
+            ctx.fillStyle = '#cffafe';
+            ctx.font = '13px JetBrains Mono, monospace';
+            ctx.fillText(`${distance.toFixed(1)}mi ${speed}`, x + 14, y + 10);
         }
 
         function drawHudTraffic(ctx, width, height, item, heading) {
