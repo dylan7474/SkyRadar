@@ -2152,27 +2152,16 @@
             const depth = Math.max(0, 1 - distance / cockpitRangeMiles);
             const x = width / 2 + (relativeBearing / 100) * (width * 0.44);
             const y = height - 72 - depth * 118;
-            const size = 9 + depth * 8;
+            const scale = 0.72 + depth * 1.15;
             const shipHeading = Number.isFinite(ship.heading) && ship.heading < 511
                 ? ship.heading
                 : (Number.isFinite(ship.course) ? ship.course : heading + relativeBearing);
 
-            ctx.save();
-            ctx.translate(x, y);
-            ctx.rotate(normalizeAngle(shipHeading - heading) * Math.PI / 180);
-            ctx.fillStyle = 'rgba(34, 211, 238, 0.92)';
-            ctx.strokeStyle = '#ecfeff';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.moveTo(0, -size * 1.25);
-            ctx.lineTo(size * 0.92, size * 0.15);
-            ctx.lineTo(size * 0.55, size * 1.15);
-            ctx.lineTo(-size * 0.55, size * 1.15);
-            ctx.lineTo(-size * 0.92, size * 0.15);
-            ctx.closePath();
-            ctx.fill();
-            ctx.stroke();
-            ctx.restore();
+            drawCockpitVectorShip(ctx, x, y, scale, normalizeAngle(shipHeading - heading), {
+                fill: 'rgba(34, 211, 238, 0.9)',
+                stroke: '#ecfeff',
+                shadow: 'rgba(34, 211, 238, 0.65)'
+            });
         }
 
         function drawHudTraffic(ctx, width, height, item, heading) {
@@ -2181,19 +2170,104 @@
             const depth = Math.max(0, 1 - distance / cockpitRangeMiles);
             const x = width / 2 + (relativeBearing / 100) * (width * 0.44);
             const y = height - 86 - depth * 178 - Math.max(-44, Math.min(44, altitudeDelta / 120));
-            const size = 9 + depth * 8;
+            const scale = 0.72 + depth * 1.2;
             const color = plane.isEmergency ? '#ef4444' : (Math.abs(altitudeDelta) < 1000 && distance < 5 ? '#facc15' : (plane.isMilitary ? '#38bdf8' : '#f59e0b'));
+            drawCockpitVectorAircraft(ctx, x, y, scale, normalizeAngle((plane.track || heading) - heading), {
+                fill: color,
+                stroke: '#f8fafc',
+                shadow: color,
+                isEmergency: plane.isEmergency
+            });
+        }
+
+        function drawCockpitVectorAircraft(ctx, x, y, scale, relativeHeading, style = {}) {
+            const unit = 13 * scale;
             ctx.save();
             ctx.translate(x, y);
-            ctx.rotate(normalizeAngle((plane.track || heading) - heading) * Math.PI / 180);
-            ctx.fillStyle = color;
+            ctx.rotate(relativeHeading * Math.PI / 180);
+            ctx.shadowColor = style.shadow || 'rgba(245, 158, 11, 0.6)';
+            ctx.shadowBlur = 9 * scale;
+            ctx.lineJoin = 'round';
+            ctx.lineCap = 'round';
+            ctx.lineWidth = Math.max(1.5, 2.2 * scale);
+            ctx.strokeStyle = style.stroke || '#f8fafc';
+            ctx.fillStyle = style.fill || '#f59e0b';
+
+            // Fuselage and nose: recognisable aircraft silhouette, pointing up.
             ctx.beginPath();
-            ctx.moveTo(0, -size);
-            ctx.lineTo(size * 0.7, size);
-            ctx.lineTo(0, size * 0.45);
-            ctx.lineTo(-size * 0.7, size);
+            ctx.moveTo(0, -1.65 * unit);
+            ctx.bezierCurveTo(0.34 * unit, -1.18 * unit, 0.38 * unit, 0.78 * unit, 0.13 * unit, 1.48 * unit);
+            ctx.lineTo(0, 1.68 * unit);
+            ctx.lineTo(-0.13 * unit, 1.48 * unit);
+            ctx.bezierCurveTo(-0.38 * unit, 0.78 * unit, -0.34 * unit, -1.18 * unit, 0, -1.65 * unit);
             ctx.closePath();
             ctx.fill();
+            ctx.stroke();
+
+            // Main wings.
+            ctx.beginPath();
+            ctx.moveTo(-0.15 * unit, -0.2 * unit);
+            ctx.lineTo(-1.55 * unit, 0.72 * unit);
+            ctx.lineTo(-1.42 * unit, 1.02 * unit);
+            ctx.lineTo(-0.1 * unit, 0.45 * unit);
+            ctx.lineTo(0.1 * unit, 0.45 * unit);
+            ctx.lineTo(1.42 * unit, 1.02 * unit);
+            ctx.lineTo(1.55 * unit, 0.72 * unit);
+            ctx.lineTo(0.15 * unit, -0.2 * unit);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+
+            // Tailplane and cockpit highlight.
+            ctx.beginPath();
+            ctx.moveTo(-0.12 * unit, 1.02 * unit);
+            ctx.lineTo(-0.86 * unit, 1.52 * unit);
+            ctx.moveTo(0.12 * unit, 1.02 * unit);
+            ctx.lineTo(0.86 * unit, 1.52 * unit);
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+            ctx.fillStyle = style.isEmergency ? '#fee2e2' : 'rgba(15, 23, 42, 0.8)';
+            ctx.beginPath();
+            ctx.ellipse(0, -0.85 * unit, 0.16 * unit, 0.34 * unit, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        }
+
+        function drawCockpitVectorShip(ctx, x, y, scale, relativeHeading, style = {}) {
+            const unit = 12 * scale;
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.rotate(relativeHeading * Math.PI / 180);
+            ctx.shadowColor = style.shadow || 'rgba(34, 211, 238, 0.65)';
+            ctx.shadowBlur = 9 * scale;
+            ctx.lineJoin = 'round';
+            ctx.lineCap = 'round';
+            ctx.lineWidth = Math.max(1.5, 2.1 * scale);
+            ctx.strokeStyle = style.stroke || '#ecfeff';
+            ctx.fillStyle = style.fill || 'rgba(34, 211, 238, 0.9)';
+
+            // Hull with pointed bow, flat stern, and bridge/deck lines.
+            ctx.beginPath();
+            ctx.moveTo(0, -1.75 * unit);
+            ctx.lineTo(1.02 * unit, -0.24 * unit);
+            ctx.lineTo(0.64 * unit, 1.35 * unit);
+            ctx.quadraticCurveTo(0, 1.62 * unit, -0.64 * unit, 1.35 * unit);
+            ctx.lineTo(-1.02 * unit, -0.24 * unit);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+
+            ctx.shadowBlur = 0;
+            ctx.strokeStyle = 'rgba(8, 47, 73, 0.85)';
+            ctx.lineWidth = Math.max(1.4, 2.4 * scale);
+            ctx.beginPath();
+            ctx.moveTo(-0.42 * unit, -0.28 * unit);
+            ctx.lineTo(0.42 * unit, -0.28 * unit);
+            ctx.moveTo(-0.34 * unit, 0.34 * unit);
+            ctx.lineTo(0.34 * unit, 0.34 * unit);
+            ctx.moveTo(-0.25 * unit, 0.88 * unit);
+            ctx.lineTo(0.25 * unit, 0.88 * unit);
+            ctx.stroke();
             ctx.restore();
         }
 
