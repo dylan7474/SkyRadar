@@ -11,6 +11,7 @@ The application is currently a static HTML app in `index.html` that loads its UI
 - Browser geolocation with manual coordinate override support.
 - Sidebar aircraft list and system log views.
 - Auto-refresh controls for repeated traffic updates.
+- Cockpit view with synthetic runway cues sourced from nearby OpenStreetMap aeroway data when available.
 - Dark tactical HUD-style interface optimized for quick scanning.
 
 ## Getting Started
@@ -45,8 +46,13 @@ http://localhost:8000
 - **Zoom + / −**: Adjust the map zoom level.
 - **Adjust Location**: Enter coordinates manually when you do not want to use browser geolocation or need to scan another area.
 - **Auto Updates**: Use the refresh control to keep nearby aircraft data current.
-- **Aircraft View**: Review detected aircraft and select entries for more detail.
+- **Aircraft View**: Review detected aircraft and select entries for more detail. Selecting an aircraft opens the cockpit view, which attempts to draw nearby airport runways in the forward window when OpenStreetMap aeroway data is available.
 - **System Logs**: Inspect app messages, API status, and warnings.
+
+## Data Sources and Limitations
+
+- Aircraft traffic uses public ADS-B-derived data sources from the browser.
+- Cockpit runway cues query OpenStreetMap Overpass for nearby `aeroway=runway` geometry and render a simplified synthetic view; runway availability depends on network access, Overpass rate limits, and OpenStreetMap coverage.
 
 ## Roadmap
 

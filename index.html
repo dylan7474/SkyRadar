@@ -636,6 +636,10 @@
         let locationAcquired = false;
         let isSimulatingDemo = false;
         const cockpitRangeMiles = 15;
+        const cockpitRunwayRangeMiles = 18;
+        const cockpitRunwayCache = new Map();
+        const cockpitRunwayRequests = new Set();
+        const cockpitRunwayEndpoint = 'https://overpass-api.de/api/interpreter';
         const cockpitTrackHistory = {};
         // Custom SVGs for crisp 2.5D Parallax Markers
         function get2_5DMarkerHTML(plane, colorTheme, stalkHeight, isSelected = false) {
@@ -1579,6 +1583,10 @@
             document.getElementById('cockpit-range').innerText = `RANGE ${cockpitRangeMiles} MI`;
             document.getElementById('cockpit-altitude').innerText = `ALT ${Math.round(altitude).toLocaleString()} FT`;
 
+            const runwayCacheKey = getCockpitRunwayCacheKey(selectedPlane.lat, selectedPlane.lon);
+            const runways = cockpitRunwayCache.get(runwayCacheKey) || [];
+            requestCockpitRunways(selectedPlane, runwayCacheKey);
+
             const traffic = aircraftList
                 .filter(plane => plane.hex !== selectedPlane.hex && plane.lat !== undefined && plane.lon !== undefined)
                 .map(plane => {
@@ -1592,7 +1600,7 @@
                 .filter(item => item.distance <= cockpitRangeMiles)
                 .sort((a, b) => a.distance - b.distance);
 
-            drawCockpitCanvas(canvas, selectedPlane, traffic, heading);
+            drawCockpitCanvas(canvas, selectedPlane, traffic, heading, runways);
             drawCockpitInstruments(selectedPlane);
             cockpit.classList.remove('hidden');
         }
@@ -1607,7 +1615,7 @@
             return ownTowardTraffic + trafficTowardOwnship;
         }
 
-        function drawCockpitCanvas(canvas, selectedPlane, traffic, heading) {
+        function drawCockpitCanvas(canvas, selectedPlane, traffic, heading, runways = []) {
             const ctx = canvas.getContext('2d');
             const width = canvas.width;
             const height = canvas.height;
@@ -1615,6 +1623,7 @@
 
             const attitude = getEstimatedAttitude(selectedPlane);
             drawBankedCockpitHorizon(ctx, width, height, attitude);
+            drawSyntheticRunways(ctx, width, height, selectedPlane, heading, attitude, runways);
             drawHudCompassTape(ctx, width, heading);
             drawHudTrafficScope(ctx, width, height);
 
@@ -1658,6 +1667,154 @@
             ctx.stroke();
             ctx.restore();
         }
+
+
+        function getCockpitRunwayCacheKey(lat, lon) {
+            // Quantize positions so nearby cockpit updates reuse the same runway lookup.
+            return `${Math.round(lat * 10) / 10},${Math.round(lon * 10) / 10}`;
+        }
+
+        async function requestCockpitRunways(selectedPlane, cacheKey) {
+            if (cockpitRunwayCache.has(cacheKey) || cockpitRunwayRequests.has(cacheKey)) return;
+            cockpitRunwayRequests.add(cacheKey);
+
+            const radiusMeters = Math.round(cockpitRunwayRangeMiles * 1609.344);
+            const query = `[out:json][timeout:8];way["aeroway"="runway"](around:${radiusMeters},${selectedPlane.lat},${selectedPlane.lon});out tags center geom;`;
+
+            try {
+                const response = await fetch(cockpitRunwayEndpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+                    body: new URLSearchParams({ data: query })
+                });
+                if (!response.ok) throw new Error(`Overpass responded ${response.status}`);
+                const data = await response.json();
+                const runways = parseCockpitRunways(data.elements || []);
+                cockpitRunwayCache.set(cacheKey, runways);
+
+                const activePlane = activeSelectedHex ? aircraftList.find(plane => plane.hex === activeSelectedHex) : null;
+                if (activePlane && getCockpitRunwayCacheKey(activePlane.lat, activePlane.lon) === cacheKey) {
+                    updateCockpitView(activePlane);
+                }
+            } catch (error) {
+                cockpitRunwayCache.set(cacheKey, []);
+                logger.add(`Cockpit runway overlay unavailable: ${error.message}`, 'warning');
+            } finally {
+                cockpitRunwayRequests.delete(cacheKey);
+            }
+        }
+
+        function parseCockpitRunways(elements) {
+            return elements
+                .map(element => {
+                    const geometry = Array.isArray(element.geometry) ? element.geometry : [];
+                    if (geometry.length < 2) return null;
+                    const start = geometry[0];
+                    const end = geometry[geometry.length - 1];
+                    const center = element.center || geometry[Math.floor(geometry.length / 2)];
+                    const heading = getBearingDegrees(start.lat, start.lon, end.lat, end.lon);
+                    const reciprocal = (heading + 180) % 360;
+                    const lengthMiles = getHaversineDistance(start.lat, start.lon, end.lat, end.lon);
+                    return {
+                        id: element.id,
+                        name: element.tags?.ref || element.tags?.name || 'RWY',
+                        surface: element.tags?.surface || 'unknown',
+                        centerLat: center.lat,
+                        centerLon: center.lon,
+                        heading,
+                        reciprocal,
+                        lengthMiles
+                    };
+                })
+                .filter(Boolean);
+        }
+
+        function drawSyntheticRunways(ctx, width, height, selectedPlane, heading, attitude, runways) {
+            if (!runways.length) {
+                drawRunwayStatus(ctx, width, height, cockpitRunwayRequests.size ? 'RUNWAY DATA LOADING' : 'NO RUNWAYS IN VIEW');
+                return;
+            }
+
+            const visibleRunways = runways
+                .map(runway => {
+                    const distance = getHaversineDistance(selectedPlane.lat, selectedPlane.lon, runway.centerLat, runway.centerLon);
+                    const bearing = getBearingDegrees(selectedPlane.lat, selectedPlane.lon, runway.centerLat, runway.centerLon);
+                    const relativeBearing = normalizeAngle(bearing - heading);
+                    const alignment = Math.min(Math.abs(normalizeAngle(runway.heading - heading)), Math.abs(normalizeAngle(runway.reciprocal - heading)));
+                    return { runway, distance, relativeBearing, alignment };
+                })
+                .filter(item => item.distance <= cockpitRunwayRangeMiles && Math.abs(item.relativeBearing) <= 55)
+                .sort((a, b) => a.distance - b.distance)
+                .slice(0, 3);
+
+            if (!visibleRunways.length) {
+                drawRunwayStatus(ctx, width, height, 'RUNWAYS OUTSIDE FOV');
+                return;
+            }
+
+            visibleRunways.reverse().forEach(item => drawSyntheticRunway(ctx, width, height, item, attitude));
+        }
+
+        function drawSyntheticRunway(ctx, width, height, item, attitude) {
+            const { runway, distance, relativeBearing, alignment } = item;
+            const depth = Math.max(0.08, 1 - distance / cockpitRunwayRangeMiles);
+            const pitch = Math.max(-15, Math.min(15, attitude.pitch || 0));
+            const bank = Math.max(-45, Math.min(45, attitude.bank || 0));
+            const centerX = width / 2 + (relativeBearing / 55) * (width * 0.42);
+            const horizonY = height * 0.48 + pitch * 2.4;
+            const runwayTopY = horizonY + 28 + (1 - depth) * 58;
+            const runwayBottomY = Math.min(height - 74, runwayTopY + 52 + depth * 170);
+            const topHalf = 7 + depth * 12;
+            const bottomHalf = 28 + depth * 116;
+            const skew = normalizeAngle(runway.heading - (item.relativeBearing >= 0 ? 0 : 180)) / 180;
+            const tilt = Math.max(-0.35, Math.min(0.35, skew)) * bottomHalf;
+
+            ctx.save();
+            ctx.translate(width / 2, horizonY);
+            ctx.rotate(-bank * Math.PI / 180);
+            ctx.translate(-width / 2, -horizonY);
+
+            const gradient = ctx.createLinearGradient(centerX, runwayTopY, centerX, runwayBottomY);
+            gradient.addColorStop(0, 'rgba(15, 23, 42, 0.45)');
+            gradient.addColorStop(1, 'rgba(30, 41, 59, 0.88)');
+            ctx.fillStyle = gradient;
+            ctx.strokeStyle = alignment < 18 ? 'rgba(250, 204, 21, 0.95)' : 'rgba(94, 234, 212, 0.78)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(centerX - topHalf, runwayTopY);
+            ctx.lineTo(centerX + topHalf, runwayTopY);
+            ctx.lineTo(centerX + bottomHalf + tilt, runwayBottomY);
+            ctx.lineTo(centerX - bottomHalf + tilt, runwayBottomY);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+
+            ctx.strokeStyle = 'rgba(248, 250, 252, 0.82)';
+            ctx.setLineDash([14, 12]);
+            ctx.beginPath();
+            ctx.moveTo(centerX, runwayTopY + 8);
+            ctx.lineTo(centerX + tilt * 0.45, runwayBottomY - 12);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            ctx.fillStyle = alignment < 18 ? '#facc15' : '#99f6e4';
+            ctx.font = '700 12px JetBrains Mono, monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(`${runway.name} ${distance.toFixed(1)}MI`, centerX, Math.max(66, runwayTopY - 10));
+            ctx.restore();
+        }
+
+        function drawRunwayStatus(ctx, width, height, label) {
+            ctx.fillStyle = 'rgba(2, 6, 23, 0.54)';
+            ctx.fillRect(width / 2 - 86, height - 124, 172, 22);
+            ctx.strokeStyle = 'rgba(45, 212, 191, 0.35)';
+            ctx.strokeRect(width / 2 - 86, height - 124, 172, 22);
+            ctx.fillStyle = 'rgba(204, 251, 241, 0.78)';
+            ctx.font = '10px JetBrains Mono, monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(label, width / 2, height - 109);
+        }
+
 
         function drawHudCompassTape(ctx, width, heading) {
             ctx.fillStyle = 'rgba(2, 6, 23, 0.62)';
