@@ -12,7 +12,7 @@ The application is currently a static HTML app in `index.html` that loads its UI
 - Browser geolocation with manual coordinate override support.
 - Sidebar aircraft list and system log views.
 - Auto-refresh controls for repeated traffic updates.
-- Cockpit view with synthetic runway cues sourced from nearby OpenStreetMap aeroway data when available.
+- Cockpit view with synthetic runway cues sourced from nearby OpenStreetMap aeroway data when available, plus forward AIS ship cues when vessels are in range.
 - Dark tactical HUD-style interface optimized for quick scanning.
 
 ## Getting Started
@@ -48,7 +48,7 @@ http://localhost:8000
 - **Adjust Location**: Enter coordinates manually when you do not want to use browser geolocation or need to scan another area.
 - **Auto Updates**: Use the refresh control to keep nearby aircraft data current.
 - **AIS Ships OFF / ON**: Enter your own AISstream.io API key to subscribe to live vessel position reports for the current radar range. The key is stored only in your browser localStorage; no API keys are committed or bundled.
-- **Aircraft View**: Review detected aircraft and select entries for more detail. Selecting an aircraft opens the cockpit view, which attempts to draw nearby airport runways in the forward window when OpenStreetMap aeroway data is available.
+- **Aircraft View**: Review detected aircraft and select entries for more detail. Selecting an aircraft opens the cockpit view, which attempts to draw nearby airport runways in the forward window when OpenStreetMap aeroway data is available and overlays AIS vessels that fall within the pilot-relative forward display range.
 - **System Logs**: Inspect app messages, API status, and warnings.
 
 ## Data Sources and Limitations
