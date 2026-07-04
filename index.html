@@ -251,6 +251,15 @@
                 </select>
             </div>
 
+            <!-- Aircraft Visibility Toggles -->
+            <div class="flex items-center gap-1 bg-slate-800/80 border border-slate-700 rounded-lg p-1" aria-label="Aircraft visibility filters">
+                <span class="text-[10px] text-slate-400 px-1.5 font-semibold uppercase tracking-wider">Show</span>
+                <button type="button" id="show-military" class="aircraft-visibility-toggle px-2 py-1 rounded-md text-[10px] font-bold border border-sky-500/40 bg-sky-500/15 text-sky-200 hover:bg-sky-500/25 transition-all" aria-pressed="true" title="Toggle military aircraft visibility">Military</button>
+                <button type="button" id="show-emergency" class="aircraft-visibility-toggle px-2 py-1 rounded-md text-[10px] font-bold border border-red-500/40 bg-red-500/15 text-red-200 hover:bg-red-500/25 transition-all" aria-pressed="true" title="Toggle emergency aircraft visibility">Emergency</button>
+                <button type="button" id="show-ground" class="aircraft-visibility-toggle px-2 py-1 rounded-md text-[10px] font-bold border border-amber-500/40 bg-amber-500/15 text-amber-200 hover:bg-amber-500/25 transition-all" aria-pressed="true" title="Toggle grounded aircraft visibility">Grounded</button>
+                <button type="button" id="show-airborne" class="aircraft-visibility-toggle px-2 py-1 rounded-md text-[10px] font-bold border border-emerald-500/40 bg-emerald-500/15 text-emerald-200 hover:bg-emerald-500/25 transition-all" aria-pressed="true" title="Toggle airborne aircraft visibility">Airborne</button>
+            </div>
+
             <!-- Toggle Panel Button -->
             <button id="btn-toggle-sidebar" class="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7"/></svg>
@@ -641,7 +650,11 @@
             emergencyOnly: false,
             groundOnly: false,
             airborneOnly: false,
-            sortBy: 'dist' // 'dist', 'alt', 'speed'
+            sortBy: 'dist', // 'dist', 'alt', 'speed'
+            showMilitary: true,
+            showEmergency: true,
+            showGround: true,
+            showAirborne: true
         };
         let refreshTimeoutId = null;
         let locationAcquired = false;
@@ -1105,6 +1118,12 @@
             setupFilterToggle('toggle-ground', 'groundOnly');
             setupFilterToggle('toggle-airborne', 'airborneOnly');
 
+            // Top bar aircraft visibility toggles
+            setupVisibilityToggle('show-military', 'showMilitary', 'military aircraft');
+            setupVisibilityToggle('show-emergency', 'showEmergency', 'emergency aircraft');
+            setupVisibilityToggle('show-ground', 'showGround', 'grounded aircraft');
+            setupVisibilityToggle('show-airborne', 'showAirborne', 'airborne aircraft');
+
             // Sort Toggle actions
             setupSortSelector('sort-dist', 'dist');
             setupSortSelector('sort-alt', 'alt');
@@ -1133,6 +1152,22 @@
                     btn.classList.remove('bg-radar-glow/20', 'border-radar-glow', 'text-white');
                 }
                 logger.add(`Filter state updated: ${filterKey} set to ${currentFilters[filterKey]}`, "info");
+                renderFilteredState();
+            });
+        }
+
+        // Setup top bar visibility toggles that de-select aircraft categories from the map and list
+        function setupVisibilityToggle(elementId, filterKey, label) {
+            const btn = document.getElementById(elementId);
+            btn.addEventListener('click', () => {
+                currentFilters[filterKey] = !currentFilters[filterKey];
+                btn.setAttribute('aria-pressed', String(currentFilters[filterKey]));
+                if (currentFilters[filterKey]) {
+                    btn.classList.remove('opacity-45', 'grayscale', 'line-through', 'bg-slate-900', 'border-slate-600', 'text-slate-500');
+                } else {
+                    btn.classList.add('opacity-45', 'grayscale', 'line-through', 'bg-slate-900', 'border-slate-600', 'text-slate-500');
+                }
+                logger.add(`Visibility updated: ${label} ${currentFilters[filterKey] ? 'shown' : 'hidden'}.`, "info");
                 renderFilteredState();
             });
         }
@@ -1564,7 +1599,13 @@
                     if (!matchHex && !matchFlight && !matchType && !matchReg) return false;
                 }
 
-                // Filter flags
+                // Top bar visibility flags remove whole categories from the map and list
+                if (!currentFilters.showMilitary && plane.isMilitary) return false;
+                if (!currentFilters.showEmergency && plane.isEmergency) return false;
+                if (!currentFilters.showGround && plane.alt_baro === "ground") return false;
+                if (!currentFilters.showAirborne && plane.alt_baro !== "ground") return false;
+
+                // Sidebar focus filters narrow the already visible aircraft set
                 if (currentFilters.milOnly && !plane.isMilitary) return false;
                 if (currentFilters.emergencyOnly && !plane.isEmergency) return false;
                 if (currentFilters.groundOnly && plane.alt_baro !== "ground") return false;
