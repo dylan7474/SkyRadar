@@ -12,6 +12,7 @@ The application is currently a static HTML app in `index.html` that loads its UI
 - Browser geolocation with manual coordinate override support.
 - Sidebar aircraft list and system log views.
 - Auto-refresh controls for repeated traffic updates.
+- Top-bar visibility toggles for hiding military, emergency, grounded, or airborne aircraft categories from the map and list.
 - Cockpit view with synthetic runway cues sourced from nearby OpenStreetMap aeroway data when available, plus forward AIS ship cues when vessels are in range.
 - Dark tactical HUD-style interface optimized for quick scanning.
 
@@ -43,6 +44,7 @@ http://localhost:8000
 
 - **Allow Location**: When prompted, allow browser geolocation so SkyRadar can center traffic around your current position.
 - **Radius**: Choose a scan radius from 10 to 150 miles.
+- **Show Military / Emergency / Grounded / Airborne**: Toggle these top-bar buttons off to de-select those aircraft categories from both the map and aircraft list.
 - **Show Panel / Hide Panel**: Toggle the aircraft and system log sidebar.
 - **Zoom + / −**: Adjust the map zoom level.
 - **Adjust Location**: Enter coordinates manually when you do not want to use browser geolocation or need to scan another area.
