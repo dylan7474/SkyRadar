@@ -676,6 +676,8 @@
         let aisEnabled = localStorage.getItem('skyradar_aisstream_enabled') === 'true';
         let currentFilters = { ...DEFAULT_FILTERS, ...(savedPreferences.filters || {}) };
         let refreshTimeoutId = null;
+        let preferredAdsBFetchStrategy = null;
+        const adsBFetchStrategyCooldowns = new Map();
         let locationAcquired = false;
         let isSimulatingDemo = false;
         const cockpitRangeMiles = 15;
@@ -1575,6 +1577,7 @@
         async function fetchWithBackoff(url, retries = 4, delay = 1000) {
             const attemptsPerStrategy = Math.max(1, Math.min(retries, 2));
             const fetchTimeoutMs = 12000;
+            const strategyCooldownMs = 60000;
 
             const appendCacheBuster = (targetUrl) => {
                 const separator = targetUrl.includes('?') ? '&' : '?';
@@ -1665,11 +1668,29 @@
                 }
             ];
 
+            const now = Date.now();
+            const availableStrategies = fetchStrategies.filter(strategy => {
+                const cooldownUntil = adsBFetchStrategyCooldowns.get(strategy.name) || 0;
+                return cooldownUntil <= now;
+            });
+
+            if (availableStrategies.length === 0) {
+                logger.add("All ADS-B fetch pathways are cooling down after recent failures; forcing a full retry sweep now.", "warning");
+                adsBFetchStrategyCooldowns.clear();
+                availableStrategies.push(...fetchStrategies);
+            }
+
+            const prioritizedStrategies = [...availableStrategies].sort((a, b) => {
+                if (a.name === preferredAdsBFetchStrategy) return -1;
+                if (b.name === preferredAdsBFetchStrategy) return 1;
+                return 0;
+            });
+
             let lastAttemptError = null;
 
-            for (let strategyIndex = 0; strategyIndex < fetchStrategies.length; strategyIndex++) {
-                const strategy = fetchStrategies[strategyIndex];
-                logger.add(`[Strategy ${strategyIndex + 1}/${fetchStrategies.length}] Attempting handshake via ${strategy.name}...`, "info");
+            for (let strategyIndex = 0; strategyIndex < prioritizedStrategies.length; strategyIndex++) {
+                const strategy = prioritizedStrategies[strategyIndex];
+                logger.add(`[Strategy ${strategyIndex + 1}/${prioritizedStrategies.length}] Attempting handshake via ${strategy.name}...`, "info");
 
                 for (let attempt = 0; attempt < attemptsPerStrategy; attempt++) {
                     try {
@@ -1677,7 +1698,9 @@
                         const data = await strategy.fn(url);
                         const duration = Date.now() - startTime;
 
-                        logger.add(`Handshake SUCCESS via ${strategy.name} in ${duration}ms.`, "success");
+                        preferredAdsBFetchStrategy = strategy.name;
+                        adsBFetchStrategyCooldowns.delete(strategy.name);
+                        logger.add(`Handshake SUCCESS via ${strategy.name} in ${duration}ms. Prioritizing this pathway for the next sweep.`, "success");
                         return data;
                     } catch (err) {
                         lastAttemptError = err;
@@ -1690,6 +1713,10 @@
                         }
                     }
                 }
+
+                adsBFetchStrategyCooldowns.set(strategy.name, Date.now() + strategyCooldownMs);
+                if (preferredAdsBFetchStrategy === strategy.name) preferredAdsBFetchStrategy = null;
+                logger.add(`${strategy.name} exhausted for this sweep; cooling it down for ${strategyCooldownMs / 1000}s to reduce repeated blocked requests.`, "warning");
             }
 
             throw lastAttemptError || new Error("All proxy pathways and direct fetches failed.");
