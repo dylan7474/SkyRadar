@@ -659,7 +659,9 @@
         const savedPreferences = loadUserPreferences();
         let userLocation = savedPreferences.userLocation || { ...DEFAULT_USER_LOCATION };
         let activeRadius = savedPreferences.activeRadius || DEFAULT_RADIUS;
-        let autoRefreshInterval = 10000; // 10s refresh loop
+        const BASE_AUTO_REFRESH_INTERVAL = 30000; // 30s minimum refresh loop to avoid public ADS-B/CORS throttles
+        const MAX_AUTO_REFRESH_INTERVAL = 120000; // Cap adaptive blocked-network backoff at 2 minutes
+        let autoRefreshInterval = BASE_AUTO_REFRESH_INTERVAL;
         let isAutoRefreshing = savedPreferences.isAutoRefreshing ?? true;
         let map = null;
         let locationPickerMap = null;
@@ -678,6 +680,7 @@
         let refreshTimeoutId = null;
         let preferredAdsBFetchStrategy = null;
         const adsBFetchStrategyCooldowns = new Map();
+        let consecutiveAdsBFailures = 0;
         let locationAcquired = false;
         let isSimulatingDemo = false;
         const cockpitRangeMiles = 15;
@@ -1403,8 +1406,8 @@
                     btnRefresh.classList.replace('border-slate-700', 'border-radar-glow/30');
                     timerTxt.innerText = "Auto Updates ON";
                     saveUserPreferences();
-                    logger.add("Automatic 10-second sweep timer re-engaged.", "info");
-                    showNotification('Updates Resumed', 'Engaging live scans every 10 seconds.', 'success');
+                    logger.add("Automatic 30-second sweep timer re-engaged.", "info");
+                    showNotification('Updates Resumed', 'Engaging live scans every 30 seconds.', 'success');
                     pollRadarSkies();
                 }
             });
@@ -1555,14 +1558,20 @@
                 const now = new Date();
                 document.getElementById('last-updated-tag').innerText = `Last updated: ${now.toLocaleTimeString()}`;
 
+                consecutiveAdsBFailures = 0;
+                autoRefreshInterval = BASE_AUTO_REFRESH_INTERVAL;
+
             } catch (error) {
                 console.error("Critical API Failover Exhausted:", error);
                 document.getElementById('radar-lbl-status').innerText = 'Network Blocked';
                 document.getElementById('radar-lbl-status').className = 'text-rose-500 font-bold';
                 
-                logger.add("🚨 LIVE TELEMETRY UNAVAILABLE: All ADS-B fetch strategies failed. This can be caused by CORS proxy rate limits, public API downtime, browser privacy shields, ad blockers, or a temporary network issue. The next auto-refresh will retry automatically; use Demo Mode to verify map rendering.", "error");
+                consecutiveAdsBFailures += 1;
+                autoRefreshInterval = Math.min(BASE_AUTO_REFRESH_INTERVAL * (2 ** Math.min(consecutiveAdsBFailures - 1, 2)), MAX_AUTO_REFRESH_INTERVAL);
 
-                showNotification('Live telemetry unavailable', 'All ADS-B fetch strategies failed. SkyRadar will retry on the next refresh; try Demo Mode to verify rendering.', 'danger');
+                logger.add(`🚨 LIVE TELEMETRY UNAVAILABLE: ${error.message || 'All ADS-B fetch strategies failed'}. SkyRadar is backing off to ${Math.round(autoRefreshInterval / 1000)}s between retries to reduce repeated blocks. This can be caused by CORS proxy rate limits, public API downtime, browser privacy shields, ad blockers, or a temporary network issue. Use Demo Mode to verify map rendering.`, "error");
+
+                showNotification('Live telemetry unavailable', `Fetch blocked. Retrying in ${Math.round(autoRefreshInterval / 1000)}s; try Demo Mode to verify rendering.`, 'danger');
             } finally {
                 if (icon) icon.classList.remove('animate-spin');
 
@@ -1577,7 +1586,7 @@
         async function fetchWithBackoff(url, retries = 4, delay = 1000) {
             const attemptsPerStrategy = Math.max(1, Math.min(retries, 2));
             const fetchTimeoutMs = 12000;
-            const strategyCooldownMs = 60000;
+            const strategyCooldownMs = 90000;
 
             const appendCacheBuster = (targetUrl) => {
                 const separator = targetUrl.includes('?') ? '&' : '?';
@@ -1675,9 +1684,10 @@
             });
 
             if (availableStrategies.length === 0) {
-                logger.add("All ADS-B fetch pathways are cooling down after recent failures; forcing a full retry sweep now.", "warning");
-                adsBFetchStrategyCooldowns.clear();
-                availableStrategies.push(...fetchStrategies);
+                const soonestRetryAt = Math.min(...fetchStrategies.map(strategy => adsBFetchStrategyCooldowns.get(strategy.name) || now));
+                const waitSeconds = Math.max(1, Math.ceil((soonestRetryAt - now) / 1000));
+                logger.add(`All ADS-B fetch pathways are cooling down after recent failures; skipping this sweep for ${waitSeconds}s instead of forcing more blocked requests.`, "warning");
+                throw new Error(`ADS-B pathways cooling down; retry in ${waitSeconds}s`);
             }
 
             const prioritizedStrategies = [...availableStrategies].sort((a, b) => {
