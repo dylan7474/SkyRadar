@@ -11,7 +11,7 @@ The application is currently a static HTML app in `index.html` that loads its UI
 - Interactive Leaflet map with custom aircraft markers and heading-aware styling.
 - Browser geolocation with a visual OpenStreetMap picker, place search, Google Maps/OpenStreetMap link parsing, and manual coordinate override support; the last radar center is saved locally for future sessions.
 - Sidebar aircraft list and system log views.
-- Auto-refresh controls for repeated traffic updates.
+- Auto-refresh controls for repeated traffic updates, with adaptive backoff when public ADS-B or CORS pathways are blocked.
 - Top-bar visibility toggles for hiding military, emergency, grounded, or airborne aircraft categories from the map and list, with preferences saved between sessions.
 - Cockpit view with synthetic runway cues sourced from nearby OpenStreetMap aeroway data when available, plus forward AIS ship cues when vessels are in range.
 - Dark tactical HUD-style interface optimized for quick scanning.
@@ -48,7 +48,7 @@ http://localhost:8000
 - **Show Panel / Hide Panel**: Toggle the aircraft and system log sidebar.
 - **Zoom + / −**: Adjust the map zoom level.
 - **Adjust Location**: Search for a place, paste a Google Maps or OpenStreetMap link, click the OpenStreetMap selector map, choose a preset, or enter coordinates manually when you do not want to use browser geolocation or need to scan another area.
-- **Auto Updates**: Use the refresh control to keep nearby aircraft data current.
+- **Auto Updates**: Use the refresh control to keep nearby aircraft data current. SkyRadar uses a 30-second baseline interval and backs off up to 2 minutes after repeated blocked fetches to reduce public API/CORS proxy throttling.
 - **AIS Ships OFF / ON**: Enter your own AISstream.io API key to subscribe to live vessel position reports for the current radar range. The key is stored only in your browser localStorage; no API keys are committed or bundled.
 - **Aircraft View**: Review detected aircraft and select entries for more detail. Selecting an aircraft opens the cockpit view, which attempts to draw nearby airport runways in the forward window when OpenStreetMap aeroway data is available and overlays AIS vessels that fall within the pilot-relative forward display range.
 - **System Logs**: Inspect app messages, API status, and warnings.
