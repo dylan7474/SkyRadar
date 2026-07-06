@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SkyRadar - Tactical ADS-B Flight Tracker</title>
+    <title>SkyRadar - Tactical ADS-B & AIS Tracker</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -225,9 +225,9 @@
             </div>
             <div>
                 <h1 class="text-lg font-bold tracking-tight text-white flex items-center gap-2">
-                    SkyRadar <span class="text-xs bg-radar-glow/20 text-radar-glow px-2 py-0.5 rounded border border-radar-glow/30">ADS-B LIVE</span>
+                    SkyRadar <span class="text-xs bg-radar-glow/20 text-radar-glow px-2 py-0.5 rounded border border-radar-glow/30">ADS-B + AIS LIVE</span>
                 </h1>
-                <p class="text-xs text-slate-400">Tactical Air Traffic Surveillance</p>
+                <p class="text-xs text-slate-400">Tactical Air & Maritime Surveillance</p>
             </div>
         </div>
 
@@ -251,6 +251,15 @@
                 </select>
             </div>
 
+            <!-- Aircraft Visibility Toggles -->
+            <div class="flex items-center gap-1 bg-slate-800/80 border border-slate-700 rounded-lg p-1" aria-label="Aircraft visibility filters">
+                <span class="text-[10px] text-slate-400 px-1.5 font-semibold uppercase tracking-wider">Show</span>
+                <button type="button" id="show-military" class="aircraft-visibility-toggle px-2 py-1 rounded-md text-[10px] font-bold border border-sky-500/40 bg-sky-500/15 text-sky-200 hover:bg-sky-500/25 transition-all" aria-pressed="true" title="Toggle military aircraft visibility">Military</button>
+                <button type="button" id="show-emergency" class="aircraft-visibility-toggle px-2 py-1 rounded-md text-[10px] font-bold border border-red-500/40 bg-red-500/15 text-red-200 hover:bg-red-500/25 transition-all" aria-pressed="true" title="Toggle emergency aircraft visibility">Emergency</button>
+                <button type="button" id="show-ground" class="aircraft-visibility-toggle px-2 py-1 rounded-md text-[10px] font-bold border border-amber-500/40 bg-amber-500/15 text-amber-200 hover:bg-amber-500/25 transition-all" aria-pressed="true" title="Toggle grounded aircraft visibility">Grounded</button>
+                <button type="button" id="show-airborne" class="aircraft-visibility-toggle px-2 py-1 rounded-md text-[10px] font-bold border border-emerald-500/40 bg-emerald-500/15 text-emerald-200 hover:bg-emerald-500/25 transition-all" aria-pressed="true" title="Toggle airborne aircraft visibility">Airborne</button>
+            </div>
+
             <!-- Toggle Panel Button -->
             <button id="btn-toggle-sidebar" class="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7"/></svg>
@@ -262,6 +271,12 @@
                 <button id="btn-zoom-out" class="px-3.5 py-1 text-slate-300 hover:text-white hover:bg-slate-700 border-r border-slate-700 font-bold text-lg transition-colors focus:outline-none" title="Zoom Out">−</button>
                 <button id="btn-zoom-in" class="px-3.5 py-1 text-slate-300 hover:text-white hover:bg-slate-700 font-bold text-lg transition-colors focus:outline-none" title="Zoom In">+</button>
             </div>
+
+            <!-- AISstream.io Shipping Toggle -->
+            <button id="btn-ais-toggle" class="bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all" title="Enable AISstream.io vessel overlays with your own API key">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 15a4 4 0 004 4h10a4 4 0 004-4M4 15l2-7h12l2 7M8 8V5h8v3"/></svg>
+                <span id="ais-toggle-text">AIS Ships OFF</span>
+            </button>
 
             <!-- Manual Coordinate Override Button -->
             <button id="btn-manual-loc" class="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all">
@@ -309,7 +324,7 @@
                     <!-- Stats Badges -->
                     <div class="grid grid-cols-4 gap-2 text-center text-xs">
                         <div class="bg-slate-950/70 rounded-lg p-2 border border-slate-800">
-                            <div class="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">In Range</div>
+                            <div class="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Targets</div>
                             <div id="stat-total" class="text-base font-bold text-white mono">0</div>
                         </div>
                         <div class="bg-slate-950/70 rounded-lg p-2 border border-slate-800">
@@ -361,7 +376,7 @@
                 <div id="aircraft-list" class="flex-grow overflow-y-auto divide-y divide-radar-border/40 bg-slate-950/20">
                     <div id="list-placeholder" class="py-12 px-4 text-center space-y-3">
                         <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-radar-glow"></div>
-                        <p class="text-sm text-slate-400">Searching airspace skies near you...</p>
+                        <p class="text-sm text-slate-400">Searching airspace and waterways near you...</p>
                     </div>
                 </div>
             </div>
@@ -400,7 +415,7 @@
 
             <!-- Powered and status footnote -->
             <div class="bg-radar-dark border-t border-radar-border p-2 px-4 flex justify-between items-center text-[10px] text-slate-500">
-                <span>Data source: <a href="https://airplanes.live" target="_blank" class="text-radar-glow hover:underline">airplanes.live Open API</a></span>
+                <span>Data sources: <a href="https://airplanes.live" target="_blank" class="text-radar-glow hover:underline">airplanes.live</a> + <a href="https://aisstream.io" target="_blank" class="text-cyan-300 hover:underline">AISstream.io</a></span>
                 <span id="last-updated-tag" class="mono">Never Updated</span>
             </div>
         </section>
@@ -622,25 +637,60 @@
         let userMarker = null;
         let radarCircle = null;
         let aircraftList = [];
+        let shipList = [];
         let lastRenderedPlanes = [];
-        let mapMarkers = {}; // Map of hex codes to leaflet markers
+        let mapMarkers = {}; // Map of target IDs to leaflet markers
+        let shipMarkers = {};
+        let aisSocket = null;
+        let aisApiKey = localStorage.getItem('skyradar_aisstream_api_key') || '';
+        let aisEnabled = localStorage.getItem('skyradar_aisstream_enabled') === 'true';
         let currentFilters = {
             search: '',
             milOnly: false,
             emergencyOnly: false,
             groundOnly: false,
             airborneOnly: false,
-            sortBy: 'dist' // 'dist', 'alt', 'speed'
+            sortBy: 'dist', // 'dist', 'alt', 'speed'
+            showMilitary: true,
+            showEmergency: true,
+            showGround: true,
+            showAirborne: true
         };
         let refreshTimeoutId = null;
         let locationAcquired = false;
         let isSimulatingDemo = false;
         const cockpitRangeMiles = 15;
+        const cockpitForwardFovDegrees = 70;
+        const cockpitHalfFovDegrees = cockpitForwardFovDegrees / 2;
         const cockpitRunwayRangeMiles = 18;
         const cockpitRunwayCache = new Map();
         const cockpitRunwayRequests = new Set();
         const cockpitRunwayEndpoint = 'https://overpass-api.de/api/interpreter';
         const cockpitTrackHistory = {};
+
+        function getShipId(ship) {
+            return `ship-${ship.mmsi || ship.id}`;
+        }
+
+        function getShipMarkerHTML(ship, isSelected = false) {
+            const heading = Number.isFinite(ship.heading) ? ship.heading : (Number.isFinite(ship.course) ? ship.course : 0);
+            const name = ship.name || `MMSI ${ship.mmsi || 'UNKNOWN'}`;
+            const speed = Number.isFinite(ship.speed) ? `${ship.speed.toFixed(1)} KTS` : 'AIS';
+            return `
+                <div class="${isSelected ? 'selected-plane-target' : ''}" style="position: relative; width: 180px; height: 86px; pointer-events: none;">
+                    <div style="position:absolute; left:78px; bottom:0; width:24px; height:34px; pointer-events:auto; cursor:pointer; filter: drop-shadow(0 5px 7px rgba(0,0,0,.8));">
+                        <svg viewBox="0 0 64 96" style="width:24px;height:34px;transform:rotate(${Math.round(heading)}deg);transform-origin:center;">
+                            <path d="M32 4 54 38 45 86H19L10 38Z" fill="#22d3ee" stroke="#ecfeff" stroke-width="4"/>
+                            <path d="M21 44h22M24 60h16" stroke="#083344" stroke-width="5" stroke-linecap="round"/>
+                        </svg>
+                    </div>
+                    <div class="aircraft-label" style="position:absolute;left:104px;bottom:11px;background:rgba(8,47,73,.82);backdrop-filter:blur(4px);border-left:2px solid #22d3ee;padding:3px 6px;border-radius:0 6px 6px 0;color:#ecfeff;font-family:'JetBrains Mono',monospace;line-height:1.2;box-shadow:0 4px 6px rgba(0,0,0,.3);pointer-events:auto;cursor:pointer;white-space:nowrap;z-index:4;">
+                        <div style="font-weight:700;font-size:11px;letter-spacing:.5px;">${name}</div>
+                        <div style="color:#bae6fd;font-size:9px;margin-top:1px;">${speed} <span style="opacity:.5">|</span> ${ship.calculatedDistance.toFixed(1)} MI</div>
+                    </div>
+                </div>`;
+        }
+
         // Custom SVGs for crisp 2.5D Parallax Markers
         function get2_5DMarkerHTML(plane, colorTheme, stalkHeight, isSelected = false) {
             const rotAngle = plane.track !== undefined && plane.track !== null ? Math.round(plane.track) : 0;
@@ -917,6 +967,11 @@
                 injectDemoTargets();
             });
 
+            document.getElementById('btn-ais-toggle').addEventListener('click', () => {
+                toggleAisStream();
+            });
+            updateAisToggleUI();
+
             // Search Input listener
             document.getElementById('search-input').addEventListener('input', (e) => {
                 currentFilters.search = e.target.value.trim().toLowerCase();
@@ -928,6 +983,7 @@
                 activeRadius = parseInt(e.target.value, 10);
                 logger.add(`Recalibrating scanner sweep radius to: ${activeRadius} miles.`, "info");
                 updateMapContext();
+                reconnectAisStream();
                 pollRadarSkies();
                 showNotification('Radar recalibration', `Radius range expanded to ${activeRadius} miles.`, 'info');
             });
@@ -1024,6 +1080,7 @@
 
                 logger.add(`Relocated tactical station center to coordinate [${latInput}, ${lonInput}]`, "success");
                 showNotification('Radar Tuned', `Ground tracking center adjusted to [${userLocation.lat.toFixed(4)}, ${userLocation.lon.toFixed(4)}]`, 'success');
+                reconnectAisStream();
                 pollRadarSkies();
             });
 
@@ -1063,6 +1120,12 @@
             setupFilterToggle('toggle-ground', 'groundOnly');
             setupFilterToggle('toggle-airborne', 'airborneOnly');
 
+            // Top bar aircraft visibility toggles
+            setupVisibilityToggle('show-military', 'showMilitary', 'military aircraft');
+            setupVisibilityToggle('show-emergency', 'showEmergency', 'emergency aircraft');
+            setupVisibilityToggle('show-ground', 'showGround', 'grounded aircraft');
+            setupVisibilityToggle('show-airborne', 'showAirborne', 'airborne aircraft');
+
             // Sort Toggle actions
             setupSortSelector('sort-dist', 'dist');
             setupSortSelector('sort-alt', 'alt');
@@ -1091,6 +1154,22 @@
                     btn.classList.remove('bg-radar-glow/20', 'border-radar-glow', 'text-white');
                 }
                 logger.add(`Filter state updated: ${filterKey} set to ${currentFilters[filterKey]}`, "info");
+                renderFilteredState();
+            });
+        }
+
+        // Setup top bar visibility toggles that de-select aircraft categories from the map and list
+        function setupVisibilityToggle(elementId, filterKey, label) {
+            const btn = document.getElementById(elementId);
+            btn.addEventListener('click', () => {
+                currentFilters[filterKey] = !currentFilters[filterKey];
+                btn.setAttribute('aria-pressed', String(currentFilters[filterKey]));
+                if (currentFilters[filterKey]) {
+                    btn.classList.remove('opacity-45', 'grayscale', 'line-through', 'bg-slate-900', 'border-slate-600', 'text-slate-500');
+                } else {
+                    btn.classList.add('opacity-45', 'grayscale', 'line-through', 'bg-slate-900', 'border-slate-600', 'text-slate-500');
+                }
+                logger.add(`Visibility updated: ${label} ${currentFilters[filterKey] ? 'shown' : 'hidden'}.`, "info");
                 renderFilteredState();
             });
         }
@@ -1173,6 +1252,9 @@
                     document.getElementById('radar-lbl-status').innerText = 'Nominal';
                     document.getElementById('radar-lbl-status').className = 'text-emerald-400 font-bold';
                 }
+
+                // AISstream is a live WebSocket feed; keep its bounding box aligned with the same radar range.
+                if (aisEnabled && !aisSocket) connectAisStream();
 
                 // Display lists and plot targets onto interactive Leaflet map
                 renderFilteredState();
@@ -1357,9 +1439,155 @@
             document.getElementById('tab-aircraft').click();
         }
 
+
+        function updateAisToggleUI() {
+            const label = document.getElementById('ais-toggle-text');
+            const button = document.getElementById('btn-ais-toggle');
+            if (!label || !button) return;
+            label.innerText = aisEnabled ? 'AIS Ships ON' : 'AIS Ships OFF';
+            button.classList.toggle('bg-cyan-500/20', aisEnabled);
+            button.classList.toggle('text-cyan-100', aisEnabled);
+        }
+
+        function toggleAisStream() {
+            if (!aisEnabled && !aisApiKey) {
+                const enteredKey = window.prompt('Enter your AISstream.io API key. It will be stored only in this browser localStorage.');
+                if (!enteredKey) {
+                    showNotification('AIS Not Enabled', 'AISstream.io requires your own API key to open the live ship feed.', 'warning');
+                    return;
+                }
+                aisApiKey = enteredKey.trim();
+                localStorage.setItem('skyradar_aisstream_api_key', aisApiKey);
+            }
+            aisEnabled = !aisEnabled;
+            localStorage.setItem('skyradar_aisstream_enabled', String(aisEnabled));
+            updateAisToggleUI();
+            if (aisEnabled) {
+                connectAisStream();
+                showNotification('AIS Enabled', 'Listening for AISstream.io vessels inside the current radar range.', 'success');
+            } else {
+                disconnectAisStream();
+                shipList = [];
+                syncShipMarkers([]);
+                renderFilteredState();
+                showNotification('AIS Disabled', 'Ship overlays have been removed from the map.', 'info');
+            }
+        }
+
+        function reconnectAisStream() {
+            if (!aisEnabled) return;
+            disconnectAisStream(false);
+            shipList = [];
+            syncShipMarkers([]);
+            connectAisStream();
+        }
+
+        function disconnectAisStream(clearHandlers = true) {
+            if (!aisSocket) return;
+            if (clearHandlers) {
+                aisSocket.onopen = null;
+                aisSocket.onmessage = null;
+                aisSocket.onerror = null;
+                aisSocket.onclose = null;
+            }
+            aisSocket.close();
+            aisSocket = null;
+        }
+
+        function connectAisStream() {
+            if (!aisEnabled || !aisApiKey || aisSocket) return;
+            try {
+                const bounds = getRadarBoundingBox(userLocation.lat, userLocation.lon, activeRadius);
+                aisSocket = new WebSocket('wss://stream.aisstream.io/v0/stream');
+                aisSocket.onopen = () => {
+                    aisSocket.send(JSON.stringify({
+                        APIKey: aisApiKey,
+                        BoundingBoxes: [[[bounds.minLat, bounds.minLon], [bounds.maxLat, bounds.maxLon]]],
+                        FilterMessageTypes: ['PositionReport']
+                    }));
+                    logger.add(`AISstream.io vessel feed subscribed for ${activeRadius} mi radar range.`, 'success');
+                };
+                aisSocket.onmessage = async (event) => {
+                    try {
+                        const payload = await parseAisMessageData(event.data);
+                        const ship = normalizeAisMessage(payload);
+                        if (!ship || ship.calculatedDistance > activeRadius) return;
+                        upsertShip(ship);
+                        renderFilteredState();
+                    } catch (error) {
+                        logger.add(`AISstream.io message could not be decoded: ${error.message}`, 'warning', {
+                            dataType: Object.prototype.toString.call(event.data),
+                            error
+                        });
+                    }
+                };
+                aisSocket.onerror = () => logger.add('AISstream.io WebSocket reported an error. Verify your API key and browser WebSocket access.', 'warning');
+                aisSocket.onclose = () => {
+                    aisSocket = null;
+                    if (aisEnabled) logger.add('AISstream.io vessel feed closed. It will reconnect on the next radar refresh or range change.', 'warning');
+                };
+            } catch (error) {
+                logger.add(`AISstream.io setup failed: ${error.message}`, 'error', error);
+                aisSocket = null;
+            }
+        }
+
+
+        async function parseAisMessageData(data) {
+            let textPayload;
+            if (typeof data === 'string') {
+                textPayload = data;
+            } else if (data instanceof Blob) {
+                textPayload = await data.text();
+            } else if (data instanceof ArrayBuffer) {
+                textPayload = new TextDecoder().decode(data);
+            } else if (ArrayBuffer.isView(data)) {
+                textPayload = new TextDecoder().decode(data);
+            } else {
+                throw new TypeError(`Unsupported AISstream.io message payload type: ${Object.prototype.toString.call(data)}`);
+            }
+
+            return JSON.parse(textPayload);
+        }
+
+        function normalizeAisMessage(payload) {
+            const report = payload?.Message?.PositionReport;
+            if (!report) return null;
+            const metadata = payload.MetaData || payload.Metadata || {};
+            const lat = Number(report.Latitude ?? metadata.latitude ?? metadata.Latitude);
+            const lon = Number(report.Longitude ?? metadata.longitude ?? metadata.Longitude);
+            if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+            const mmsi = String(report.UserID ?? metadata.MMSI ?? metadata.Mmsi ?? '').trim();
+            const name = (metadata.ShipName || metadata.ship_name || '').trim();
+            return { id: mmsi || `${lat.toFixed(5)},${lon.toFixed(5)}`, mmsi, name, lat, lon, speed: Number(report.Sog), course: Number(report.Cog), heading: Number(report.TrueHeading), navStatus: report.NavigationalStatus, calculatedDistance: getHaversineDistance(userLocation.lat, userLocation.lon, lat, lon), lastSeen: Date.now() };
+        }
+
+        function upsertShip(ship) {
+            const cutoff = Date.now() - 15 * 60 * 1000;
+            shipList = shipList.filter(existing => existing.lastSeen >= cutoff && getShipId(existing) !== getShipId(ship));
+            shipList.push(ship);
+        }
+
+        function getRadarBoundingBox(lat, lon, radiusMiles) {
+            const latDelta = radiusMiles / 69;
+            const lonDelta = radiusMiles / (69 * Math.max(Math.cos(lat * Math.PI / 180), 0.01));
+            return { minLat: Math.max(-90, lat - latDelta), minLon: Math.max(-180, lon - lonDelta), maxLat: Math.min(90, lat + latDelta), maxLon: Math.min(180, lon + lonDelta) };
+        }
+
         // Apply filters & render aircraft list and markers
         function renderFilteredState() {
             // Filter array
+            let filteredShips = shipList.filter(ship => {
+                if (ship.lat === undefined || ship.lon === undefined) return false;
+                if (ship.calculatedDistance > activeRadius) return false;
+                if (currentFilters.search) {
+                    const haystack = `${ship.name || ''} ${ship.mmsi || ''}`.toLowerCase();
+                    if (!haystack.includes(currentFilters.search)) return false;
+                }
+                if (currentFilters.milOnly || currentFilters.emergencyOnly || currentFilters.groundOnly || currentFilters.airborneOnly) return false;
+                return true;
+            });
+
             let filtered = aircraftList.filter(plane => {
                 // Ignore planes with missing essential coordinate metrics
                 if (plane.lat === undefined || plane.lon === undefined) return false;
@@ -1373,7 +1601,13 @@
                     if (!matchHex && !matchFlight && !matchType && !matchReg) return false;
                 }
 
-                // Filter flags
+                // Top bar visibility flags remove whole categories from the map and list
+                if (!currentFilters.showMilitary && plane.isMilitary) return false;
+                if (!currentFilters.showEmergency && plane.isEmergency) return false;
+                if (!currentFilters.showGround && plane.alt_baro === "ground") return false;
+                if (!currentFilters.showAirborne && plane.alt_baro !== "ground") return false;
+
+                // Sidebar focus filters narrow the already visible aircraft set
                 if (currentFilters.milOnly && !plane.isMilitary) return false;
                 if (currentFilters.emergencyOnly && !plane.isEmergency) return false;
                 if (currentFilters.groundOnly && plane.alt_baro !== "ground") return false;
@@ -1404,13 +1638,14 @@
             lastRenderedPlanes = filtered;
 
             // Render stats bar on side panel
-            updateStatisticsDisplay(filtered);
+            updateStatisticsDisplay(filtered, filteredShips);
 
             // Re-render side panel HTML
-            renderListPanel(filtered);
+            renderListPanel(filtered, filteredShips);
 
             // Sync visual targets mapped onto the Leaflet Canvas
             syncMapMarkers(filtered);
+            syncShipMarkers(filteredShips);
             
             // Ensure HUD remains updated with live moving data if a target is actively selected
             if (activeSelectedHex) {
@@ -1424,8 +1659,8 @@
         }
 
         // Helper calculations for visual stats indicators
-        function updateStatisticsDisplay(planes) {
-            document.getElementById('stat-total').innerText = planes.length;
+        function updateStatisticsDisplay(planes, ships = []) {
+            document.getElementById('stat-total').innerText = planes.length + ships.length;
             
             const milCount = planes.filter(p => p.isMilitary).length;
             document.getElementById('stat-military').innerText = milCount;
@@ -1445,21 +1680,43 @@
         }
 
         // Generate side list cards HTML
-        function renderListPanel(planes) {
+        function renderListPanel(planes, ships = []) {
             const listContainer = document.getElementById('aircraft-list');
             
-            if (planes.length === 0) {
+            if (planes.length === 0 && ships.length === 0) {
                 listContainer.innerHTML = `
                     <div class="py-16 px-4 text-center space-y-2">
                         <svg class="w-10 h-10 text-slate-600 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
-                        <p class="text-sm font-semibold text-slate-300">No Aircraft Located</p>
-                        <p class="text-xs text-slate-500">Try zooming out the scanner radius or adjustment controls to active airspaces.</p>
+                        <p class="text-sm font-semibold text-slate-300">No Targets Located</p>
+                        <p class="text-xs text-slate-500">Try zooming out the scanner radius, enabling AIS ships, or adjusting controls to active airspaces/waterways.</p>
                     </div>
                 `;
                 return;
             }
 
             let htmlString = '';
+            ships.forEach(ship => {
+                const shipId = getShipId(ship);
+                const name = ship.name || `MMSI ${ship.mmsi || 'Unknown'}`;
+                const speed = Number.isFinite(ship.speed) ? `${ship.speed.toFixed(1)} kts` : 'N/A';
+                const heading = Number.isFinite(ship.heading) && ship.heading < 511 ? `${Math.round(ship.heading)}°` : (Number.isFinite(ship.course) ? `${Math.round(ship.course)}°` : 'N/A');
+                htmlString += `
+                    <div class="p-3.5 hover:bg-cyan-950/30 border-l-4 border-cyan-400/70 transition-all cursor-pointer" onclick="focusOnShip('${shipId}', true)">
+                        <div class="flex items-center justify-between gap-2 mb-1.5">
+                            <div class="flex items-center gap-2">
+                                <span class="text-sm font-bold text-cyan-100 uppercase tracking-wide mono">${name}</span>
+                                <span class="text-xs text-cyan-200 font-mono text-[10px] bg-cyan-950 px-1 rounded">${ship.mmsi || 'AIS'}</span>
+                            </div>
+                            <span class="text-xs font-semibold text-cyan-200 bg-cyan-500/10 px-2 py-0.5 rounded-full border border-cyan-500/20">${ship.calculatedDistance.toFixed(1)} miles</span>
+                        </div>
+                        <div class="grid grid-cols-3 gap-2 text-xs text-slate-400">
+                            <div><span class="block text-[10px] text-slate-500 uppercase tracking-tight">Target</span><strong class="text-cyan-300 block truncate">AIS Vessel</strong></div>
+                            <div><span class="block text-[10px] text-slate-500 uppercase tracking-tight">Speed</span><strong class="text-slate-300 block truncate">${speed}</strong></div>
+                            <div><span class="block text-[10px] text-slate-500 uppercase tracking-tight">Heading</span><strong class="text-slate-300 block truncate">${heading}</strong></div>
+                        </div>
+                    </div>`;
+            });
+
             planes.forEach(plane => {
                 const callsign = (plane.flight || 'N/A').trim();
                 const typeCode = plane.t || 'Unknown';
@@ -1570,6 +1827,14 @@
             if (cockpit) cockpit.classList.add('hidden');
         }
 
+        function isCockpitTrafficCandidate(plane, selectedPlane) {
+            if (!plane || !selectedPlane || plane === selectedPlane) return false;
+            const planeHex = (plane.hex || '').toString().trim().toLowerCase();
+            const selectedHex = (selectedPlane.hex || '').toString().trim().toLowerCase();
+            if (planeHex && selectedHex && planeHex === selectedHex) return false;
+            return plane.lat !== undefined && plane.lon !== undefined;
+        }
+
         function updateCockpitView(selectedPlane) {
             const cockpit = document.getElementById('cockpit-view');
             const canvas = document.getElementById('cockpit-canvas');
@@ -1588,7 +1853,7 @@
             requestCockpitRunways(selectedPlane, runwayCacheKey);
 
             const traffic = aircraftList
-                .filter(plane => plane.hex !== selectedPlane.hex && plane.lat !== undefined && plane.lon !== undefined)
+                .filter(plane => isCockpitTrafficCandidate(plane, selectedPlane))
                 .map(plane => {
                     const distance = getHaversineDistance(selectedPlane.lat, selectedPlane.lon, plane.lat, plane.lon);
                     const bearing = getBearingDegrees(selectedPlane.lat, selectedPlane.lon, plane.lat, plane.lon);
@@ -1597,12 +1862,33 @@
                     const closureRate = estimateClosureRate(selectedPlane, plane, bearing);
                     return { plane, distance, bearing, relativeBearing, altitudeDelta, closureRate };
                 })
-                .filter(item => item.distance <= cockpitRangeMiles)
+                .filter(item => item.distance <= cockpitRangeMiles && Math.abs(item.relativeBearing) <= cockpitHalfFovDegrees)
                 .sort((a, b) => a.distance - b.distance);
 
-            drawCockpitCanvas(canvas, selectedPlane, traffic, heading, runways);
-            drawCockpitInstruments(selectedPlane);
+            const shipsInView = getCockpitShipsInView(selectedPlane, heading);
+            document.getElementById('cockpit-range').innerText = `FWD ${cockpitForwardFovDegrees}° · ${cockpitRangeMiles} MI${shipsInView.length ? ` · ${shipsInView.length} AIS` : ''}`;
+
+            const attitude = getEstimatedAttitude(selectedPlane);
+            drawCockpitCanvas(canvas, selectedPlane, traffic, heading, runways, shipsInView, attitude);
+            drawCockpitInstruments(selectedPlane, attitude);
             cockpit.classList.remove('hidden');
+        }
+
+
+        function getCockpitShipsInView(selectedPlane, heading) {
+            const ownshipAltitude = getPlaneAltitudeFeet(selectedPlane);
+            return shipList
+                .filter(ship => ship.lat !== undefined && ship.lon !== undefined)
+                .map(ship => {
+                    const distance = getHaversineDistance(selectedPlane.lat, selectedPlane.lon, ship.lat, ship.lon);
+                    const bearing = getBearingDegrees(selectedPlane.lat, selectedPlane.lon, ship.lat, ship.lon);
+                    const relativeBearing = normalizeAngle(bearing - heading);
+                    const altitudeDelta = -ownshipAltitude;
+                    return { ship, distance, bearing, relativeBearing, altitudeDelta };
+                })
+                .filter(item => item.distance <= cockpitRangeMiles && Math.abs(item.relativeBearing) <= cockpitHalfFovDegrees)
+                .sort((a, b) => a.distance - b.distance)
+                .slice(0, 8);
         }
 
         function estimateClosureRate(ownship, trafficPlane, bearingToTraffic) {
@@ -1615,18 +1901,18 @@
             return ownTowardTraffic + trafficTowardOwnship;
         }
 
-        function drawCockpitCanvas(canvas, selectedPlane, traffic, heading, runways = []) {
+        function drawCockpitCanvas(canvas, selectedPlane, traffic, heading, runways = [], shipsInView = [], attitude = getEstimatedAttitude(selectedPlane)) {
             const ctx = canvas.getContext('2d');
             const width = canvas.width;
             const height = canvas.height;
             ctx.clearRect(0, 0, width, height);
 
-            const attitude = getEstimatedAttitude(selectedPlane);
             drawBankedCockpitHorizon(ctx, width, height, attitude);
             drawSyntheticRunways(ctx, width, height, selectedPlane, heading, attitude, runways);
             drawHudCompassTape(ctx, width, heading);
             drawHudTrafficScope(ctx, width, height);
 
+            shipsInView.forEach(item => drawHudShip(ctx, width, height, item, heading));
             traffic.forEach(item => drawHudTraffic(ctx, width, height, item, heading));
 
             drawOwnshipSymbol(ctx, width, height);
@@ -1743,7 +2029,7 @@
                     const alignment = Math.min(Math.abs(normalizeAngle(runway.heading - heading)), Math.abs(normalizeAngle(runway.reciprocal - heading)));
                     return { runway, distance, relativeBearing, alignment };
                 })
-                .filter(item => item.distance <= cockpitRunwayRangeMiles && Math.abs(item.relativeBearing) <= 55)
+                .filter(item => item.distance <= cockpitRunwayRangeMiles && Math.abs(item.relativeBearing) <= cockpitHalfFovDegrees)
                 .sort((a, b) => a.distance - b.distance)
                 .slice(0, 3);
 
@@ -1760,7 +2046,7 @@
             const depth = Math.max(0.08, 1 - distance / cockpitRunwayRangeMiles);
             const pitch = Math.max(-15, Math.min(15, attitude.pitch || 0));
             const bank = Math.max(-45, Math.min(45, attitude.bank || 0));
-            const centerX = width / 2 + (relativeBearing / 55) * (width * 0.42);
+            const centerX = width / 2 + (relativeBearing / cockpitHalfFovDegrees) * (width * 0.42);
             const horizonY = height * 0.48 + pitch * 2.4;
             const runwayTopY = horizonY + 28 + (1 - depth) * 58;
             const runwayBottomY = Math.min(height - 74, runwayTopY + 52 + depth * 170);
@@ -1858,50 +2144,173 @@
         }
 
         function drawOwnshipSymbol(ctx, width, height) {
-            const y = height - 66;
-            ctx.strokeStyle = '#34d399';
-            ctx.fillStyle = '#10b981';
-            ctx.lineWidth = 3;
+            // The selected aircraft is the camera/ownship, not external traffic.
+            // Draw it as a fixed HUD reference at the bottom of the combiner so it
+            // cannot be mistaken for another aircraft ahead of the monitored plane.
+            const centerX = width / 2;
+            const y = height - 48;
+
+            ctx.save();
+            ctx.strokeStyle = 'rgba(52, 211, 153, 0.95)';
+            ctx.fillStyle = 'rgba(16, 185, 129, 0.16)';
+            ctx.lineWidth = 2;
+            ctx.lineJoin = 'round';
+            ctx.lineCap = 'round';
+
             ctx.beginPath();
-            ctx.moveTo(width / 2, y - 25);
-            ctx.lineTo(width / 2 - 18, y + 16);
-            ctx.lineTo(width / 2, y + 7);
-            ctx.lineTo(width / 2 + 18, y + 16);
-            ctx.closePath();
-            ctx.fill();
+            ctx.moveTo(centerX - 38, y + 16);
+            ctx.lineTo(centerX - 14, y);
+            ctx.lineTo(centerX, y - 30);
+            ctx.lineTo(centerX + 14, y);
+            ctx.lineTo(centerX + 38, y + 16);
             ctx.stroke();
+
+            ctx.beginPath();
+            ctx.moveTo(centerX, y - 30);
+            ctx.lineTo(centerX, y + 22);
+            ctx.stroke();
+
+            ctx.fillRect(centerX - 36, y + 22, 72, 16);
+            ctx.strokeRect(centerX - 36, y + 22, 72, 16);
+            ctx.fillStyle = '#bbf7d0';
+            ctx.font = '700 9px JetBrains Mono, monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText('OWN SHIP', centerX, y + 34);
+            ctx.restore();
+        }
+
+
+        function getCockpitTrafficProjection(width, height, distance, relativeBearing, altitudeDelta = 0) {
+            const rangeRatio = Math.max(0, Math.min(1, distance / cockpitRangeMiles));
+            const closeness = 1 - rangeRatio;
+            const perspective = Math.pow(closeness, 1.45);
+            const horizonY = height * 0.31;
+            const ownshipY = height - 78;
+            const lateralSpread = width * (0.18 + 0.28 * closeness);
+            const x = width / 2 + (relativeBearing / cockpitHalfFovDegrees) * lateralSpread;
+            const altitudeOffset = Math.max(-52, Math.min(52, altitudeDelta / 110));
+            const y = horizonY + (ownshipY - horizonY) * perspective - altitudeOffset;
+            const scale = 0.34 + perspective * 1.72;
+
+            return { x, y, scale };
+        }
+
+        function drawHudShip(ctx, width, height, item, heading) {
+            const { ship, distance, relativeBearing, altitudeDelta } = item;
+            const { x, y, scale } = getCockpitTrafficProjection(width, height, distance, relativeBearing, altitudeDelta);
+            const shipHeading = Number.isFinite(ship.heading) && ship.heading < 511
+                ? ship.heading
+                : (Number.isFinite(ship.course) ? ship.course : heading + relativeBearing);
+
+            drawCockpitVectorShip(ctx, x, y, scale, normalizeAngle(shipHeading - heading), {
+                fill: 'rgba(34, 211, 238, 0.9)',
+                stroke: '#ecfeff',
+                shadow: 'rgba(34, 211, 238, 0.65)'
+            });
         }
 
         function drawHudTraffic(ctx, width, height, item, heading) {
             const { plane, distance, relativeBearing, altitudeDelta, closureRate } = item;
-            if (Math.abs(relativeBearing) > 100) return;
-            const depth = Math.max(0, 1 - distance / cockpitRangeMiles);
-            const x = width / 2 + (relativeBearing / 100) * (width * 0.44);
-            const y = height - 86 - depth * 178 - Math.max(-44, Math.min(44, altitudeDelta / 120));
-            const size = 9 + depth * 8;
+            if (Math.abs(relativeBearing) > cockpitHalfFovDegrees) return;
+            const { x, y, scale } = getCockpitTrafficProjection(width, height, distance, relativeBearing, altitudeDelta);
             const color = plane.isEmergency ? '#ef4444' : (Math.abs(altitudeDelta) < 1000 && distance < 5 ? '#facc15' : (plane.isMilitary ? '#38bdf8' : '#f59e0b'));
+            drawCockpitVectorAircraft(ctx, x, y, scale, normalizeAngle((plane.track || heading) - heading), {
+                fill: color,
+                stroke: '#f8fafc',
+                shadow: color,
+                isEmergency: plane.isEmergency
+            });
+        }
+
+        function drawCockpitVectorAircraft(ctx, x, y, scale, relativeHeading, style = {}) {
+            const unit = 13 * scale;
             ctx.save();
             ctx.translate(x, y);
-            ctx.rotate(normalizeAngle((plane.track || heading) - heading) * Math.PI / 180);
-            ctx.fillStyle = color;
+            ctx.rotate(relativeHeading * Math.PI / 180);
+            ctx.shadowColor = style.shadow || 'rgba(245, 158, 11, 0.6)';
+            ctx.shadowBlur = 9 * scale;
+            ctx.lineJoin = 'round';
+            ctx.lineCap = 'round';
+            ctx.lineWidth = Math.max(1.5, 2.2 * scale);
+            ctx.strokeStyle = style.stroke || '#f8fafc';
+            ctx.fillStyle = style.fill || '#f59e0b';
+
+            // Fuselage and nose: recognisable aircraft silhouette, pointing up.
             ctx.beginPath();
-            ctx.moveTo(0, -size);
-            ctx.lineTo(size * 0.7, size);
-            ctx.lineTo(0, size * 0.45);
-            ctx.lineTo(-size * 0.7, size);
+            ctx.moveTo(0, -1.65 * unit);
+            ctx.bezierCurveTo(0.34 * unit, -1.18 * unit, 0.38 * unit, 0.78 * unit, 0.13 * unit, 1.48 * unit);
+            ctx.lineTo(0, 1.68 * unit);
+            ctx.lineTo(-0.13 * unit, 1.48 * unit);
+            ctx.bezierCurveTo(-0.38 * unit, 0.78 * unit, -0.34 * unit, -1.18 * unit, 0, -1.65 * unit);
             ctx.closePath();
             ctx.fill();
-            ctx.restore();
+            ctx.stroke();
 
-            const altText = `${altitudeDelta >= 0 ? '+' : '-'}${Math.round(Math.abs(altitudeDelta) / 100).toString().padStart(2, '0')}`;
-            const trend = closureRate > 80 ? '▲' : closureRate < -80 ? '▼' : '•';
-            ctx.fillStyle = color;
-            ctx.font = '700 18px JetBrains Mono, monospace';
-            ctx.textAlign = 'left';
-            ctx.fillText((plane.flight || plane.hex || 'UNK').trim().slice(0, 8), x + 14, y - 12);
-            ctx.fillStyle = '#e2e8f0';
-            ctx.font = '14px JetBrains Mono, monospace';
-            ctx.fillText(`${distance.toFixed(1)}mi ${altText} ${trend}`, x + 14, y + 8);
+            // Main wings.
+            ctx.beginPath();
+            ctx.moveTo(-0.15 * unit, -0.2 * unit);
+            ctx.lineTo(-1.55 * unit, 0.72 * unit);
+            ctx.lineTo(-1.42 * unit, 1.02 * unit);
+            ctx.lineTo(-0.1 * unit, 0.45 * unit);
+            ctx.lineTo(0.1 * unit, 0.45 * unit);
+            ctx.lineTo(1.42 * unit, 1.02 * unit);
+            ctx.lineTo(1.55 * unit, 0.72 * unit);
+            ctx.lineTo(0.15 * unit, -0.2 * unit);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+
+            // Tailplane and cockpit highlight.
+            ctx.beginPath();
+            ctx.moveTo(-0.12 * unit, 1.02 * unit);
+            ctx.lineTo(-0.86 * unit, 1.52 * unit);
+            ctx.moveTo(0.12 * unit, 1.02 * unit);
+            ctx.lineTo(0.86 * unit, 1.52 * unit);
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+            ctx.fillStyle = style.isEmergency ? '#fee2e2' : 'rgba(15, 23, 42, 0.8)';
+            ctx.beginPath();
+            ctx.ellipse(0, -0.85 * unit, 0.16 * unit, 0.34 * unit, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        }
+
+        function drawCockpitVectorShip(ctx, x, y, scale, relativeHeading, style = {}) {
+            const unit = 12 * scale;
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.rotate(relativeHeading * Math.PI / 180);
+            ctx.shadowColor = style.shadow || 'rgba(34, 211, 238, 0.65)';
+            ctx.shadowBlur = 9 * scale;
+            ctx.lineJoin = 'round';
+            ctx.lineCap = 'round';
+            ctx.lineWidth = Math.max(1.5, 2.1 * scale);
+            ctx.strokeStyle = style.stroke || '#ecfeff';
+            ctx.fillStyle = style.fill || 'rgba(34, 211, 238, 0.9)';
+
+            // Hull with pointed bow, flat stern, and bridge/deck lines.
+            ctx.beginPath();
+            ctx.moveTo(0, -1.75 * unit);
+            ctx.lineTo(1.02 * unit, -0.24 * unit);
+            ctx.lineTo(0.64 * unit, 1.35 * unit);
+            ctx.quadraticCurveTo(0, 1.62 * unit, -0.64 * unit, 1.35 * unit);
+            ctx.lineTo(-1.02 * unit, -0.24 * unit);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+
+            ctx.shadowBlur = 0;
+            ctx.strokeStyle = 'rgba(8, 47, 73, 0.85)';
+            ctx.lineWidth = Math.max(1.4, 2.4 * scale);
+            ctx.beginPath();
+            ctx.moveTo(-0.42 * unit, -0.28 * unit);
+            ctx.lineTo(0.42 * unit, -0.28 * unit);
+            ctx.moveTo(-0.34 * unit, 0.34 * unit);
+            ctx.lineTo(0.34 * unit, 0.34 * unit);
+            ctx.moveTo(-0.25 * unit, 0.88 * unit);
+            ctx.lineTo(0.25 * unit, 0.88 * unit);
+            ctx.stroke();
+            ctx.restore();
         }
 
         function getPlaneAltitudeFeet(plane) {
@@ -1953,7 +2362,7 @@
             };
         }
 
-        function drawCockpitInstruments(plane) {
+        function drawCockpitInstruments(plane, attitude = getEstimatedAttitude(plane)) {
             const canvas = document.getElementById('cockpit-instruments');
             if (!canvas) return;
             const ctx = canvas.getContext('2d');
@@ -1963,7 +2372,6 @@
             const altitude = getPlaneAltitudeFeet(plane);
             const heading = Number.parseFloat(plane.track ?? plane.true_heading ?? plane.mag_heading ?? 0) || 0;
             const verticalSpeed = getPlaneVerticalSpeedFpm(plane);
-            const attitude = getEstimatedAttitude(plane);
             const gauges = [
                 { x: 130, y: 130, title: 'AIRSPEED', subtitle: 'KNOTS', type: 'asi', value: speed, min: 0, max: 500, major: 100 },
                 { x: 390, y: 130, title: 'ATTITUDE', subtitle: 'EST', type: 'attitude', value: attitude },
@@ -2231,6 +2639,61 @@
                     mapMarkers[plane.hex] = marker;
                 }
             });
+        }
+
+
+        function syncShipMarkers(activeShips) {
+            const currentShipIds = new Set(activeShips.map(getShipId));
+            Object.keys(shipMarkers).forEach(id => {
+                if (!currentShipIds.has(id)) {
+                    map.removeLayer(shipMarkers[id]);
+                    delete shipMarkers[id];
+                }
+            });
+
+            activeShips.forEach(ship => {
+                const id = getShipId(ship);
+                const coord = [ship.lat, ship.lon];
+                const icon = L.divIcon({
+                    className: 'custom-ship-marker',
+                    html: getShipMarkerHTML(ship, false),
+                    iconSize: [180, 86],
+                    iconAnchor: [90, 86]
+                });
+                if (shipMarkers[id]) {
+                    shipMarkers[id].setLatLng(coord);
+                    shipMarkers[id].setIcon(icon);
+                } else {
+                    const marker = L.marker(coord, { icon, zIndexOffset: 500 }).addTo(map);
+                    marker.on('click', (e) => {
+                        L.DomEvent.stopPropagation(e);
+                        focusOnShip(id, false);
+                    });
+                    shipMarkers[id] = marker;
+                }
+            });
+        }
+
+        function focusOnShip(id, panMap = true) {
+            const ship = shipList.find(s => getShipId(s) === id);
+            if (!ship) return;
+            hideHUD();
+            const hud = document.getElementById('hud-overlay');
+            const speed = Number.isFinite(ship.speed) ? `${ship.speed.toFixed(1)} kts` : 'N/A';
+            const heading = Number.isFinite(ship.heading) && ship.heading < 511 ? `${Math.round(ship.heading)}°` : (Number.isFinite(ship.course) ? `${Math.round(ship.course)}°` : 'N/A');
+            hud.innerHTML = `
+                <div class="flex items-start justify-between gap-4 mb-3">
+                    <div><p class="text-[10px] uppercase tracking-[0.18em] text-cyan-300 font-bold">AIS Vessel</p><h3 class="text-lg font-bold text-white mono">${ship.name || `MMSI ${ship.mmsi || 'UNKNOWN'}`}</h3></div>
+                    <button onclick="hideHUD()" class="text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-full w-6 h-6 flex items-center justify-center transition-colors">✕</button>
+                </div>
+                <div class="grid grid-cols-2 gap-3 text-xs">
+                    <div class="bg-slate-950/70 rounded-lg p-2 border border-slate-800"><span class="block text-slate-500 uppercase text-[9px]">MMSI</span><strong class="text-cyan-200 mono">${ship.mmsi || 'N/A'}</strong></div>
+                    <div class="bg-slate-950/70 rounded-lg p-2 border border-slate-800"><span class="block text-slate-500 uppercase text-[9px]">Distance</span><strong class="text-cyan-200 mono">${ship.calculatedDistance.toFixed(1)} mi</strong></div>
+                    <div class="bg-slate-950/70 rounded-lg p-2 border border-slate-800"><span class="block text-slate-500 uppercase text-[9px]">Speed</span><strong class="text-white mono">${speed}</strong></div>
+                    <div class="bg-slate-950/70 rounded-lg p-2 border border-slate-800"><span class="block text-slate-500 uppercase text-[9px]">Heading</span><strong class="text-white mono">${heading}</strong></div>
+                </div>`;
+            hud.classList.remove('hidden');
+            if (panMap && shipMarkers[id]) map.setView(shipMarkers[id].getLatLng(), 11, { animate: true });
         }
 
         // Detailed targeting visual focus helper
