@@ -2251,11 +2251,32 @@
         }
 
         async function requestCockpitRunways(selectedPlane, cacheKey) {
-            if (cockpitRunwayCache.has(cacheKey) || cockpitRunwayRequests.has(cacheKey)) return;
+            if (cockpitRunwayCache.has(cacheKey)) {
+                logger.add(`Cockpit runway lookup skipped; cache hit for ${cacheKey}.`, 'info', {
+                    cacheKey,
+                    cachedRunways: cockpitRunwayCache.get(cacheKey)?.length || 0
+                });
+                return;
+            }
+            if (cockpitRunwayRequests.has(cacheKey)) {
+                logger.add(`Cockpit runway lookup already in flight for ${cacheKey}.`, 'info', { cacheKey });
+                return;
+            }
             cockpitRunwayRequests.add(cacheKey);
 
             const radiusMeters = Math.round(cockpitRunwayRangeMiles * 1609.344);
-            const query = `[out:json][timeout:8];way["aeroway"="runway"](around:${radiusMeters},${selectedPlane.lat},${selectedPlane.lon});out tags center geom;`;
+            const query = `[out:json][timeout:12];(way["aeroway"="runway"](around:${radiusMeters},${selectedPlane.lat},${selectedPlane.lon});relation["aeroway"="runway"](around:${radiusMeters},${selectedPlane.lat},${selectedPlane.lon}););out tags center geom;`;
+            const startedAt = performance.now();
+            logger.add(`Cockpit runway lookup started for ${cacheKey}.`, 'info', {
+                endpoint: cockpitRunwayEndpoint,
+                cacheKey,
+                selectedAircraft: selectedPlane.hex || selectedPlane.flight || 'unknown',
+                latitude: selectedPlane.lat,
+                longitude: selectedPlane.lon,
+                radiusMiles: cockpitRunwayRangeMiles,
+                radiusMeters,
+                query
+            });
 
             try {
                 const response = await fetch(cockpitRunwayEndpoint, {
@@ -2263,10 +2284,38 @@
                     headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
                     body: new URLSearchParams({ data: query })
                 });
-                if (!response.ok) throw new Error(`Overpass responded ${response.status}`);
-                const data = await response.json();
-                const runways = parseCockpitRunways(data.elements || []);
+                const durationMs = Math.round(performance.now() - startedAt);
+                const contentType = response.headers.get('content-type') || 'unknown';
+                const responseText = await response.text();
+                if (!response.ok) {
+                    throw new Error(`Overpass responded ${response.status} ${response.statusText || ''}`.trim(), {
+                        cause: { status: response.status, contentType, responsePreview: responseText.slice(0, 500), durationMs }
+                    });
+                }
+
+                let data;
+                try {
+                    data = JSON.parse(responseText);
+                } catch (parseError) {
+                    throw new Error(`Overpass returned non-JSON runway data: ${parseError.message}`, {
+                        cause: { contentType, responsePreview: responseText.slice(0, 500), durationMs }
+                    });
+                }
+
+                const elements = Array.isArray(data.elements) ? data.elements : [];
+                const parseDiagnostics = { skippedMissingGeometry: 0, skippedInvalidCoordinates: 0 };
+                const runways = parseCockpitRunways(elements, parseDiagnostics);
                 cockpitRunwayCache.set(cacheKey, runways);
+                logger.add(`Cockpit runway lookup completed: ${runways.length} runway(s) parsed from ${elements.length} Overpass element(s).`, runways.length ? 'success' : 'warning', {
+                    cacheKey,
+                    durationMs,
+                    status: response.status,
+                    contentType,
+                    elementCount: elements.length,
+                    parsedRunwayCount: runways.length,
+                    parseDiagnostics,
+                    sampleRunways: runways.slice(0, 5)
+                });
 
                 const activePlane = activeSelectedHex ? aircraftList.find(plane => plane.hex === activeSelectedHex) : null;
                 if (activePlane && getCockpitRunwayCacheKey(activePlane.lat, activePlane.lon) === cacheKey) {
@@ -2274,25 +2323,45 @@
                 }
             } catch (error) {
                 cockpitRunwayCache.set(cacheKey, []);
-                logger.add(`Cockpit runway overlay unavailable: ${error.message}`, 'warning');
+                logger.add(`Cockpit runway overlay unavailable: ${error.message}`, 'warning', {
+                    cacheKey,
+                    endpoint: cockpitRunwayEndpoint,
+                    selectedAircraft: selectedPlane.hex || selectedPlane.flight || 'unknown',
+                    latitude: selectedPlane.lat,
+                    longitude: selectedPlane.lon,
+                    radiusMiles: cockpitRunwayRangeMiles,
+                    browserOnline: navigator.onLine,
+                    errorName: error.name,
+                    errorMessage: error.message,
+                    errorCause: error.cause || null,
+                    stack: error.stack
+                });
             } finally {
                 cockpitRunwayRequests.delete(cacheKey);
             }
         }
 
-        function parseCockpitRunways(elements) {
+        function parseCockpitRunways(elements, diagnostics = null) {
             return elements
                 .map(element => {
                     const geometry = Array.isArray(element.geometry) ? element.geometry : [];
-                    if (geometry.length < 2) return null;
+                    if (geometry.length < 2) {
+                        if (diagnostics) diagnostics.skippedMissingGeometry += 1;
+                        return null;
+                    }
                     const start = geometry[0];
                     const end = geometry[geometry.length - 1];
                     const center = element.center || geometry[Math.floor(geometry.length / 2)];
+                    if (![start.lat, start.lon, end.lat, end.lon, center.lat, center.lon].every(Number.isFinite)) {
+                        if (diagnostics) diagnostics.skippedInvalidCoordinates += 1;
+                        return null;
+                    }
                     const heading = getBearingDegrees(start.lat, start.lon, end.lat, end.lon);
                     const reciprocal = (heading + 180) % 360;
                     const lengthMiles = getHaversineDistance(start.lat, start.lon, end.lat, end.lon);
                     return {
                         id: element.id,
+                        type: element.type || 'way',
                         name: element.tags?.ref || element.tags?.name || 'RWY',
                         surface: element.tags?.surface || 'unknown',
                         centerLat: center.lat,
