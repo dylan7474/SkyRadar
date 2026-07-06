@@ -1558,9 +1558,9 @@
                 document.getElementById('radar-lbl-status').innerText = 'Network Blocked';
                 document.getElementById('radar-lbl-status').className = 'text-rose-500 font-bold';
                 
-                logger.add("🚨 NETWORK INTERCEPT DETECTED: All external requests were killed. This is almost always caused by an AdBlocker (uBlock, AdBlock Plus) or Brave Shields blocking the URL because it contains the keyword 'adsb' or blocking 3rd-party iframe data. Please disable shields/adblockers for this page or use Demo Mode.", "error");
+                logger.add("🚨 LIVE TELEMETRY UNAVAILABLE: All ADS-B fetch strategies failed. This can be caused by CORS proxy rate limits, public API downtime, browser privacy shields, ad blockers, or a temporary network issue. The next auto-refresh will retry automatically; use Demo Mode to verify map rendering.", "error");
 
-                showNotification('Connection Blocked', 'Adblocker or Privacy Shields are likely blocking the connection. Please disable them and try again.', 'danger');
+                showNotification('Live telemetry unavailable', 'All ADS-B fetch strategies failed. SkyRadar will retry on the next refresh; try Demo Mode to verify rendering.', 'danger');
             } finally {
                 if (icon) icon.classList.remove('animate-spin');
 
@@ -1571,77 +1571,119 @@
             }
         }
 
-        // Multi-tier Fallback CORS Fetcher to systematically bypass sandbox origin constraints
+        // Multi-tier fallback CORS fetcher for browser-only ADS-B requests.
         async function fetchWithBackoff(url, retries = 4, delay = 1000) {
-            // An array of structural fetch closures tried progressively upon fail
+            const attemptsPerStrategy = Math.max(1, Math.min(retries, 2));
+            const fetchTimeoutMs = 12000;
+
+            const appendCacheBuster = (targetUrl) => {
+                const separator = targetUrl.includes('?') ? '&' : '?';
+                return `${targetUrl}${separator}_=${Date.now()}`;
+            };
+
+            const fetchJson = async (targetUrl, options = {}) => {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), fetchTimeoutMs);
+
+                try {
+                    const response = await fetch(targetUrl, {
+                        cache: 'no-store',
+                        ...options,
+                        headers: {
+                            'Accept': 'application/json',
+                            ...(options.headers || {})
+                        },
+                        signal: controller.signal
+                    });
+
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+                    const text = await response.text();
+                    try {
+                        return JSON.parse(text);
+                    } catch (parseError) {
+                        const preview = text.trim().slice(0, 80) || 'empty response';
+                        throw new Error(`Non-JSON response: ${preview}`);
+                    }
+                } catch (error) {
+                    if (error.name === 'AbortError') throw new Error(`Timed out after ${fetchTimeoutMs / 1000}s`);
+                    throw error;
+                } finally {
+                    clearTimeout(timeoutId);
+                }
+            };
+
+            const validateAircraftPayload = (data) => {
+                if (!data || !Array.isArray(data.ac)) {
+                    throw new Error('Response did not include an aircraft array');
+                }
+                return data;
+            };
+
+            // Try direct access first, then public CORS relays. Public relays are opportunistic and can rate-limit,
+            // so every URL is cache-busted and every payload is validated before the scan is considered healthy.
             const fetchStrategies = [
-                // Phase 0: Direct browser fetch (for unrestricted or standard local environments)
                 {
                     name: "Direct API Fetch",
-                    fn: async (targetUrl) => {
-                        const response = await fetch(targetUrl, { headers: { 'Accept': 'application/json' }});
-                        if (!response.ok) throw new Error(`Direct HTTP ${response.status}`);
-                        return await response.json();
-                    }
+                    fn: async (targetUrl) => validateAircraftPayload(await fetchJson(appendCacheBuster(targetUrl)))
                 },
-                // Phase 1: AllOrigins JSON Wrapper (extremely robust, wraps inside a custom payload to completely dodge null-origin CSP limits)
                 {
                     name: "AllOrigins Wrapper Proxy",
                     fn: async (targetUrl) => {
-                        // Prevent cached errors
-                        const uncachedUrl = `${targetUrl}&_=${Date.now()}`;
-                        const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(uncachedUrl)}`;
-                        const response = await fetch(proxyUrl);
-                        if (!response.ok) throw new Error(`AllOrigins HTTP ${response.status}`);
-                        const wrappedData = await response.json();
+                        const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(appendCacheBuster(targetUrl))}`;
+                        const wrappedData = await fetchJson(proxyUrl);
                         if (!wrappedData.contents) throw new Error("AllOrigins wrapper contents were empty");
-                        return JSON.parse(wrappedData.contents);
+
+                        try {
+                            return validateAircraftPayload(JSON.parse(wrappedData.contents));
+                        } catch (parseError) {
+                            const preview = String(wrappedData.contents).trim().slice(0, 80) || 'empty response';
+                            throw new Error(`AllOrigins returned non-JSON payload: ${preview}`);
+                        }
                     }
                 },
-                // Phase 2: ThingProxy Bridge
+                {
+                    name: "CorsProxy.io Bridge",
+                    fn: async (targetUrl) => {
+                        const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(appendCacheBuster(targetUrl))}`;
+                        return validateAircraftPayload(await fetchJson(proxyUrl));
+                    }
+                },
                 {
                     name: "ThingProxy Bridge",
                     fn: async (targetUrl) => {
-                        const proxyUrl = `https://thingproxy.freeboard.io/fetch/${targetUrl}`;
-                        const response = await fetch(proxyUrl);
-                        if (!response.ok) throw new Error(`ThingProxy HTTP ${response.status}`);
-                        return await response.json();
+                        const proxyUrl = `https://thingproxy.freeboard.io/fetch/${appendCacheBuster(targetUrl)}`;
+                        return validateAircraftPayload(await fetchJson(proxyUrl));
                     }
                 },
-                // Phase 3: CodeTabs CORS Proxy
                 {
                     name: "CodeTabs API Bridge",
                     fn: async (targetUrl) => {
-                        const proxyUrl = `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`;
-                        const response = await fetch(proxyUrl);
-                        if (!response.ok) throw new Error(`CodeTabs HTTP ${response.status}`);
-                        return await response.json();
+                        const proxyUrl = `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(appendCacheBuster(targetUrl))}`;
+                        return validateAircraftPayload(await fetchJson(proxyUrl));
                     }
                 }
             ];
 
             let lastAttemptError = null;
 
-            // Iterate sequentially through each network strategy
             for (let strategyIndex = 0; strategyIndex < fetchStrategies.length; strategyIndex++) {
                 const strategy = fetchStrategies[strategyIndex];
                 logger.add(`[Strategy ${strategyIndex + 1}/${fetchStrategies.length}] Attempting handshake via ${strategy.name}...`, "info");
-                
-                // For each strategy, perform attempts with exponential backoff on retryable issues
-                for (let attempt = 0; attempt < 2; attempt++) {
+
+                for (let attempt = 0; attempt < attemptsPerStrategy; attempt++) {
                     try {
                         const startTime = Date.now();
                         const data = await strategy.fn(url);
                         const duration = Date.now() - startTime;
-                        
+
                         logger.add(`Handshake SUCCESS via ${strategy.name} in ${duration}ms.`, "success");
-                        return data; // Success! Return immediately.
+                        return data;
                     } catch (err) {
                         lastAttemptError = err;
                         logger.add(`[Strategy ${strategyIndex + 1} - Attempt ${attempt + 1} Fail]: ${err.message}`, "warning");
-                        
-                        // Wait and implement backoff delay if retrying this specific method
-                        if (attempt < 1) {
+
+                        if (attempt < attemptsPerStrategy - 1) {
                             const sleepMs = delay * (attempt + 1);
                             logger.add(`Backing off for ${sleepMs}ms before retrying ${strategy.name}...`, "info");
                             await new Promise(resolve => setTimeout(resolve, sleepMs));
@@ -1649,7 +1691,7 @@
                     }
                 }
             }
-            
+
             throw lastAttemptError || new Error("All proxy pathways and direct fetches failed.");
         }
 
