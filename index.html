@@ -1864,6 +1864,16 @@
             return { minLat: Math.max(-90, lat - latDelta), minLon: Math.max(-180, lon - lonDelta), maxLat: Math.min(90, lat + latDelta), maxLon: Math.min(180, lon + lonDelta) };
         }
 
+
+        function isPlaneVisibleByShowControls(plane) {
+            if (!plane) return false;
+            if (!currentFilters.showMilitary && plane.isMilitary) return false;
+            if (!currentFilters.showEmergency && plane.isEmergency) return false;
+            if (!currentFilters.showGround && plane.alt_baro === "ground") return false;
+            if (!currentFilters.showAirborne && plane.alt_baro !== "ground") return false;
+            return true;
+        }
+
         // Apply filters & render aircraft list and markers
         function renderFilteredState() {
             // Filter array
@@ -1891,11 +1901,8 @@
                     if (!matchHex && !matchFlight && !matchType && !matchReg) return false;
                 }
 
-                // Top bar visibility flags remove whole categories from the map and list
-                if (!currentFilters.showMilitary && plane.isMilitary) return false;
-                if (!currentFilters.showEmergency && plane.isEmergency) return false;
-                if (!currentFilters.showGround && plane.alt_baro === "ground") return false;
-                if (!currentFilters.showAirborne && plane.alt_baro !== "ground") return false;
+                // Top bar visibility flags remove whole categories from the map, list, and cockpit traffic view
+                if (!isPlaneVisibleByShowControls(plane)) return false;
 
                 // Sidebar focus filters narrow the already visible aircraft set
                 if (currentFilters.milOnly && !plane.isMilitary) return false;
@@ -1939,11 +1946,11 @@
             
             // Ensure HUD remains updated with live moving data if a target is actively selected
             if (activeSelectedHex) {
-                const livePlane = aircraftList.find(p => p.hex === activeSelectedHex);
+                const livePlane = filtered.find(p => p.hex === activeSelectedHex);
                 if (livePlane) {
                     showHUD(livePlane);
                 } else {
-                    hideHUD(); // Plane flew out of range
+                    hideHUD(); // Plane flew out of range or was hidden by the SHOW controls
                 }
             }
         }
@@ -2142,7 +2149,8 @@
             const runways = cockpitRunwayCache.get(runwayCacheKey) || [];
             requestCockpitRunways(selectedPlane, runwayCacheKey);
 
-            const traffic = aircraftList
+            const visibleCockpitPlanes = lastRenderedPlanes.length ? lastRenderedPlanes : aircraftList.filter(isPlaneVisibleByShowControls);
+            const traffic = visibleCockpitPlanes
                 .filter(plane => isCockpitTrafficCandidate(plane, selectedPlane))
                 .map(plane => {
                     const distance = getHaversineDistance(selectedPlane.lat, selectedPlane.lon, plane.lat, plane.lon);
@@ -2156,7 +2164,7 @@
                 .sort((a, b) => a.distance - b.distance);
 
             const shipsInView = getCockpitShipsInView(selectedPlane, heading);
-            document.getElementById('cockpit-range').innerText = `FWD ${cockpitForwardFovDegrees}° · ${cockpitRangeMiles} MI${shipsInView.length ? ` · ${shipsInView.length} AIS` : ''}`;
+            document.getElementById('cockpit-range').innerText = `FWD ${cockpitForwardFovDegrees}° · ${cockpitRangeMiles} MI · ${traffic.length} VISIBLE${shipsInView.length ? ` · ${shipsInView.length} AIS` : ''}`;
 
             const attitude = getEstimatedAttitude(selectedPlane);
             drawCockpitCanvas(canvas, selectedPlane, traffic, heading, runways, shipsInView, attitude);
@@ -3062,7 +3070,7 @@
             // Highlight list selection
             renderListPanel(lastRenderedPlanes);
             
-            const plane = aircraftList.find(p => p.hex === hex);
+            const plane = lastRenderedPlanes.find(p => p.hex === hex);
             if (plane) showHUD(plane);
             syncMapMarkers(lastRenderedPlanes);
 
