@@ -483,21 +483,32 @@
 
     <!-- Dialog / Manual Coordinates Prompt Modal -->
     <div id="modal-coords" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 z-[9999] transition-all">
-        <div class="bg-radar-panel border border-radar-border rounded-xl shadow-2xl max-w-md w-full p-6 text-slate-100">
+        <div class="bg-radar-panel border border-radar-border rounded-xl shadow-2xl max-w-2xl w-full p-6 text-slate-100">
             <h3 class="text-lg font-bold text-white mb-2 flex items-center gap-2">
                 <svg class="w-5 h-5 text-radar-glow" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
                 Adjust Ground Radar Station
             </h3>
-            <p class="text-xs text-slate-400 mb-4">Overwrite automatically calculated geolocation coordinates or enter custom parameters to scout other worldwide airspaces.</p>
+            <p class="text-xs text-slate-400 mb-4">Overwrite automatically calculated geolocation coordinates, search for a place, paste a Google Maps/OpenStreetMap link, or click the selector map to scout other worldwide airspaces.</p>
             
             <div class="space-y-3.5">
                 <div>
-                    <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1" for="manual-lat">Latitude</label>
-                    <input type="number" step="0.00001" id="manual-lat" class="w-full bg-slate-950 border border-radar-border rounded-lg px-3 py-2 text-sm text-white focus:ring-1 focus:ring-radar-glow focus:outline-none" placeholder="e.g. 51.5074">
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1" for="location-search-input">Search or Paste Map Link</label>
+                    <div class="flex gap-2">
+                        <input type="text" id="location-search-input" class="flex-1 bg-slate-950 border border-radar-border rounded-lg px-3 py-2 text-sm text-white focus:ring-1 focus:ring-radar-glow focus:outline-none" placeholder="Search a place, or paste a Google Maps / OpenStreetMap URL">
+                        <button type="button" id="btn-location-search" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-3 py-2 rounded-lg text-xs font-bold transition-all">Find</button>
+                    </div>
+                    <p id="location-search-help" class="text-[11px] text-slate-500 mt-1">Tip: click the selector map below to set the radar center without typing coordinates.</p>
                 </div>
-                <div>
-                    <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1" for="manual-lon">Longitude</label>
-                    <input type="number" step="0.00001" id="manual-lon" class="w-full bg-slate-950 border border-radar-border rounded-lg px-3 py-2 text-sm text-white focus:ring-1 focus:ring-radar-glow focus:outline-none" placeholder="e.g. -0.1278">
+                <div id="location-picker-map" class="h-56 rounded-lg overflow-hidden border border-radar-border bg-slate-950"></div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1" for="manual-lat">Latitude</label>
+                        <input type="number" step="0.00001" id="manual-lat" class="w-full bg-slate-950 border border-radar-border rounded-lg px-3 py-2 text-sm text-white focus:ring-1 focus:ring-radar-glow focus:outline-none" placeholder="e.g. 51.5074">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1" for="manual-lon">Longitude</label>
+                        <input type="number" step="0.00001" id="manual-lon" class="w-full bg-slate-950 border border-radar-border rounded-lg px-3 py-2 text-sm text-white focus:ring-1 focus:ring-radar-glow focus:outline-none" placeholder="e.g. -0.1278">
+                    </div>
                 </div>
                 <div>
                     <span class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Quick Airspace Presets</span>
@@ -629,22 +640,11 @@
         });
 
         // State variables
-        let userLocation = { lat: 51.5074, lon: -0.1278 }; // Default London
-        let activeRadius = 50; // Statute miles
-        let autoRefreshInterval = 10000; // 10s refresh loop
-        let isAutoRefreshing = true;
-        let map = null;
-        let userMarker = null;
-        let radarCircle = null;
-        let aircraftList = [];
-        let shipList = [];
-        let lastRenderedPlanes = [];
-        let mapMarkers = {}; // Map of target IDs to leaflet markers
-        let shipMarkers = {};
-        let aisSocket = null;
-        let aisApiKey = localStorage.getItem('skyradar_aisstream_api_key') || '';
-        let aisEnabled = localStorage.getItem('skyradar_aisstream_enabled') === 'true';
-        let currentFilters = {
+        const PREFERENCES_STORAGE_KEY = 'skyradar_user_preferences_v1';
+        const DEFAULT_USER_LOCATION = { lat: 51.5074, lon: -0.1278 }; // Default London
+        const DEFAULT_RADIUS = 50; // Statute miles
+        const ALLOWED_RADII = [10, 25, 50, 100, 150];
+        const DEFAULT_FILTERS = {
             search: '',
             milOnly: false,
             emergencyOnly: false,
@@ -656,6 +656,25 @@
             showGround: true,
             showAirborne: true
         };
+        const savedPreferences = loadUserPreferences();
+        let userLocation = savedPreferences.userLocation || { ...DEFAULT_USER_LOCATION };
+        let activeRadius = savedPreferences.activeRadius || DEFAULT_RADIUS;
+        let autoRefreshInterval = 10000; // 10s refresh loop
+        let isAutoRefreshing = savedPreferences.isAutoRefreshing ?? true;
+        let map = null;
+        let locationPickerMap = null;
+        let locationPickerMarker = null;
+        let userMarker = null;
+        let radarCircle = null;
+        let aircraftList = [];
+        let shipList = [];
+        let lastRenderedPlanes = [];
+        let mapMarkers = {}; // Map of target IDs to leaflet markers
+        let shipMarkers = {};
+        let aisSocket = null;
+        let aisApiKey = localStorage.getItem('skyradar_aisstream_api_key') || '';
+        let aisEnabled = localStorage.getItem('skyradar_aisstream_enabled') === 'true';
+        let currentFilters = { ...DEFAULT_FILTERS, ...(savedPreferences.filters || {}) };
         let refreshTimeoutId = null;
         let locationAcquired = false;
         let isSimulatingDemo = false;
@@ -667,6 +686,250 @@
         const cockpitRunwayRequests = new Set();
         const cockpitRunwayEndpoint = 'https://overpass-api.de/api/interpreter';
         const cockpitTrackHistory = {};
+
+        function isValidCoordinate(lat, lon) {
+            return Number.isFinite(lat) && Number.isFinite(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180;
+        }
+
+        function syncManualCoordinateInputs(lat, lon) {
+            const latField = document.getElementById('manual-lat');
+            const lonField = document.getElementById('manual-lon');
+            if (latField) latField.value = Number(lat).toFixed(5);
+            if (lonField) lonField.value = Number(lon).toFixed(5);
+        }
+
+        function setLocationPickerCenter(lat, lon, zoom = 11) {
+            if (!isValidCoordinate(lat, lon)) return;
+            syncManualCoordinateInputs(lat, lon);
+
+            if (!locationPickerMap) return;
+            const nextCenter = [lat, lon];
+            locationPickerMap.setView(nextCenter, Math.max(locationPickerMap.getZoom() || zoom, zoom));
+            if (!locationPickerMarker) {
+                locationPickerMarker = L.marker(nextCenter, { draggable: true }).addTo(locationPickerMap);
+                locationPickerMarker.on('dragend', () => {
+                    const markerPosition = locationPickerMarker.getLatLng();
+                    syncManualCoordinateInputs(markerPosition.lat, markerPosition.lng);
+                });
+            } else {
+                locationPickerMarker.setLatLng(nextCenter);
+            }
+        }
+
+        function initLocationPickerMap() {
+            if (!map || locationPickerMap) return;
+
+            locationPickerMap = L.map('location-picker-map', {
+                zoomControl: true,
+                attributionControl: false
+            }).setView([userLocation.lat, userLocation.lon], 11);
+
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19
+            }).addTo(locationPickerMap);
+
+            locationPickerMap.on('click', (event) => {
+                setLocationPickerCenter(event.latlng.lat, event.latlng.lng, locationPickerMap.getZoom());
+                logger.add(`Location picker selected coordinate [${event.latlng.lat.toFixed(5)}, ${event.latlng.lng.toFixed(5)}]`, 'info');
+            });
+
+            setLocationPickerCenter(userLocation.lat, userLocation.lon, 11);
+        }
+
+        function parseCoordinatesFromMapText(rawText) {
+            const text = rawText.trim();
+            if (!text) return null;
+
+            const urlAtPattern = /@(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)/;
+            const osmMapPattern = /#map=\d+\/(-?\d+(?:\.\d+)?)\/(-?\d+(?:\.\d+)?)/;
+            const queryParamsPattern = /[?&](?:mlat|lat|latitude)=(-?\d+(?:\.\d+)?).*?[?&](?:mlon|lon|lng|longitude)=(-?\d+(?:\.\d+)?)/i;
+            const plainCoordsPattern = /(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/;
+
+            const match = text.match(urlAtPattern) || text.match(osmMapPattern) || text.match(queryParamsPattern) || text.match(plainCoordsPattern);
+            if (!match) return null;
+
+            const lat = Number(match[1]);
+            const lon = Number(match[2]);
+            return isValidCoordinate(lat, lon) ? { lat, lon } : null;
+        }
+
+        async function searchLocationFromInput() {
+            const searchInput = document.getElementById('location-search-input');
+            const helpText = document.getElementById('location-search-help');
+            const query = searchInput ? searchInput.value.trim() : '';
+            if (!query) {
+                showNotification('Location Search', 'Enter a place name or paste a Google Maps/OpenStreetMap link first.', 'warning');
+                return;
+            }
+
+            const parsedCoords = parseCoordinatesFromMapText(query);
+            if (parsedCoords) {
+                setLocationPickerCenter(parsedCoords.lat, parsedCoords.lon, 13);
+                if (helpText) helpText.innerText = 'Coordinates found in your map link. Click Apply Coordinates to use them.';
+                showNotification('Map Link Parsed', 'Coordinates loaded from the pasted map link.', 'success');
+                return;
+            }
+
+            if (helpText) helpText.innerText = 'Searching OpenStreetMap for that place...';
+            try {
+                const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(query)}`, {
+                    headers: { 'Accept': 'application/json' }
+                });
+                if (!response.ok) throw new Error(`Search request failed with HTTP ${response.status}`);
+                const results = await response.json();
+                if (!Array.isArray(results) || !results.length) {
+                    showNotification('No Location Found', 'Try a more specific place name or paste a map URL.', 'warning');
+                    if (helpText) helpText.innerText = 'No match found. Try a city, airport, address, or map URL.';
+                    return;
+                }
+
+                const bestMatch = results[0];
+                const lat = Number(bestMatch.lat);
+                const lon = Number(bestMatch.lon);
+                if (!isValidCoordinate(lat, lon)) throw new Error('Search result did not include valid coordinates.');
+
+                setLocationPickerCenter(lat, lon, 13);
+                if (helpText) helpText.innerText = bestMatch.display_name || 'Place found. Click Apply Coordinates to use it.';
+                showNotification('Location Found', bestMatch.display_name || `${lat.toFixed(4)}, ${lon.toFixed(4)}`, 'success');
+            } catch (error) {
+                logger.add('OpenStreetMap location search failed.', 'warning', error);
+                if (helpText) helpText.innerText = 'Search failed. You can still click the selector map or enter coordinates manually.';
+                showNotification('Search Unavailable', 'OpenStreetMap search could not be reached. Use the picker map or manual coordinates.', 'warning');
+            }
+        }
+
+        function loadUserPreferences() {
+            const fallback = {};
+            try {
+                const rawPreferences = localStorage.getItem(PREFERENCES_STORAGE_KEY);
+                if (!rawPreferences) return fallback;
+
+                const parsed = JSON.parse(rawPreferences);
+                const nextPreferences = {};
+
+                if (parsed.userLocation && isValidCoordinate(Number(parsed.userLocation.lat), Number(parsed.userLocation.lon))) {
+                    nextPreferences.userLocation = {
+                        lat: Number(parsed.userLocation.lat),
+                        lon: Number(parsed.userLocation.lon)
+                    };
+                }
+
+                const parsedRadius = Number(parsed.activeRadius);
+                if (ALLOWED_RADII.includes(parsedRadius)) {
+                    nextPreferences.activeRadius = parsedRadius;
+                }
+
+                if (typeof parsed.isAutoRefreshing === 'boolean') {
+                    nextPreferences.isAutoRefreshing = parsed.isAutoRefreshing;
+                }
+
+                if (parsed.filters && typeof parsed.filters === 'object') {
+                    nextPreferences.filters = {};
+                    Object.keys(DEFAULT_FILTERS).forEach((key) => {
+                        if (typeof DEFAULT_FILTERS[key] === 'boolean' && typeof parsed.filters[key] === 'boolean') {
+                            nextPreferences.filters[key] = parsed.filters[key];
+                        }
+                    });
+                    if (['dist', 'alt', 'speed'].includes(parsed.filters.sortBy)) {
+                        nextPreferences.filters.sortBy = parsed.filters.sortBy;
+                    }
+                    if (typeof parsed.filters.search === 'string') {
+                        nextPreferences.filters.search = parsed.filters.search.slice(0, 80);
+                    }
+                }
+
+                return nextPreferences;
+            } catch (error) {
+                logger.add('Stored preferences could not be loaded. Starting with defaults.', 'warning', error);
+                return fallback;
+            }
+        }
+
+        function saveUserPreferences() {
+            const preferences = {
+                userLocation: { ...userLocation },
+                activeRadius,
+                isAutoRefreshing,
+                filters: { ...currentFilters }
+            };
+
+            try {
+                localStorage.setItem(PREFERENCES_STORAGE_KEY, JSON.stringify(preferences));
+            } catch (error) {
+                logger.add('Browser storage rejected preference updates for this session.', 'warning', error);
+            }
+        }
+
+        function applyPersistedControlState() {
+            const radiusSelect = document.getElementById('radius-select');
+            if (radiusSelect) radiusSelect.value = String(activeRadius);
+
+            const searchInput = document.getElementById('search-input');
+            if (searchInput) searchInput.value = currentFilters.search;
+
+            syncManualCoordinateInputs(userLocation.lat, userLocation.lon);
+
+            ['milOnly', 'emergencyOnly', 'groundOnly', 'airborneOnly'].forEach((filterKey) => {
+                const filterButtonMap = {
+                    milOnly: 'toggle-mil',
+                    emergencyOnly: 'toggle-emergency',
+                    groundOnly: 'toggle-ground',
+                    airborneOnly: 'toggle-airborne'
+                };
+                const button = document.getElementById(filterButtonMap[filterKey]);
+                if (button && currentFilters[filterKey]) {
+                    button.classList.add('bg-radar-glow/20', 'border-radar-glow', 'text-white');
+                }
+            });
+
+            ['showMilitary', 'showEmergency', 'showGround', 'showAirborne'].forEach((filterKey) => {
+                const visibilityButtonMap = {
+                    showMilitary: 'show-military',
+                    showEmergency: 'show-emergency',
+                    showGround: 'show-ground',
+                    showAirborne: 'show-airborne'
+                };
+                updateVisibilityToggleButton(document.getElementById(visibilityButtonMap[filterKey]), currentFilters[filterKey]);
+            });
+
+            ['sort-dist', 'sort-alt', 'sort-speed'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) {
+                    el.classList.remove('text-radar-glow', 'font-bold');
+                    el.classList.add('hover:text-slate-200');
+                }
+            });
+            const activeSortButton = document.getElementById(`sort-${currentFilters.sortBy}`);
+            if (activeSortButton) {
+                activeSortButton.classList.add('text-radar-glow', 'font-bold');
+            }
+
+            updateAutoRefreshButtonState();
+        }
+
+        function updateVisibilityToggleButton(btn, isEnabled) {
+            if (!btn) return;
+            btn.setAttribute('aria-pressed', String(isEnabled));
+            if (isEnabled) {
+                btn.classList.remove('opacity-45', 'grayscale', 'line-through', 'bg-slate-900', 'border-slate-600', 'text-slate-500');
+            } else {
+                btn.classList.add('opacity-45', 'grayscale', 'line-through', 'bg-slate-900', 'border-slate-600', 'text-slate-500');
+            }
+        }
+
+        function updateAutoRefreshButtonState() {
+            const btnRefresh = document.getElementById('btn-refresh');
+            const timerTxt = document.getElementById('refresh-timer-txt');
+            if (!btnRefresh || !timerTxt) return;
+
+            btnRefresh.classList.toggle('bg-radar-glow/10', isAutoRefreshing);
+            btnRefresh.classList.toggle('text-radar-glow', isAutoRefreshing);
+            btnRefresh.classList.toggle('border-radar-glow/30', isAutoRefreshing);
+            btnRefresh.classList.toggle('bg-slate-800/80', !isAutoRefreshing);
+            btnRefresh.classList.toggle('text-slate-400', !isAutoRefreshing);
+            btnRefresh.classList.toggle('border-slate-700', !isAutoRefreshing);
+            timerTxt.innerText = isAutoRefreshing ? 'Auto Updates ON' : 'Auto Updates OFF';
+        }
 
         function getShipId(ship) {
             return `ship-${ship.mmsi || ship.id}`;
@@ -751,6 +1014,7 @@
         // Initialize App on DOM Loaded
         document.addEventListener('DOMContentLoaded', () => {
             logger.add("SkyRadar launched. Initializing mapping engines...", "info");
+            applyPersistedControlState();
             initLeafletMap();
             requestUserLocation();
             setupEventListeners();
@@ -841,6 +1105,7 @@
                         userLocation.lat = position.coords.latitude;
                         userLocation.lon = position.coords.longitude;
                         locationAcquired = true;
+                        saveUserPreferences();
                         
                         logger.add(`Geolocation successful. Center synchronized: ${userLocation.lat}, ${userLocation.lon}`, "success");
                         updateGeoStatusIndicator('success', 'Location Detected');
@@ -848,8 +1113,7 @@
                         showNotification('Location Found', `Successfully locked onto coordinate [${userLocation.lat.toFixed(4)}, ${userLocation.lon.toFixed(4)}]`, 'success');
                         
                         // Seed fields inside coordinates override modal
-                        document.getElementById('manual-lat').value = userLocation.lat.toFixed(5);
-                        document.getElementById('manual-lon').value = userLocation.lon.toFixed(5);
+                        syncManualCoordinateInputs(userLocation.lat, userLocation.lon);
                         
                         // Run first air intelligence scan
                         pollRadarSkies();
@@ -857,12 +1121,12 @@
                     (error) => {
                         console.warn('Geolocation failed: ' + error.message);
                         locationAcquired = false;
-                        updateGeoStatusIndicator('error', 'Location Blocked (using default)');
-                        showNotification('GPS Blocked', 'Using default radar center (London). Click "Adjust Location" to select a preset or type in your coordinates!', 'warning');
+                        const usingSavedCenter = Boolean(savedPreferences.userLocation);
+                        updateGeoStatusIndicator('error', usingSavedCenter ? 'Location Blocked (using saved center)' : 'Location Blocked (using default)');
+                        showNotification('GPS Blocked', usingSavedCenter ? 'Using your saved radar center. Click "Adjust Location" to change it.' : 'Using default radar center (London). Click "Adjust Location" to select a preset or type in your coordinates!', 'warning');
                         
                         // Pre-populate defaults in manual modal anyway
-                        document.getElementById('manual-lat').value = userLocation.lat.toFixed(5);
-                        document.getElementById('manual-lon').value = userLocation.lon.toFixed(5);
+                        syncManualCoordinateInputs(userLocation.lat, userLocation.lon);
                         
                         // Keep going with fallback coordinates
                         pollRadarSkies();
@@ -975,12 +1239,14 @@
             // Search Input listener
             document.getElementById('search-input').addEventListener('input', (e) => {
                 currentFilters.search = e.target.value.trim().toLowerCase();
+                saveUserPreferences();
                 renderFilteredState();
             });
 
             // Radius Selection Update
             document.getElementById('radius-select').addEventListener('change', (e) => {
                 activeRadius = parseInt(e.target.value, 10);
+                saveUserPreferences();
                 logger.add(`Recalibrating scanner sweep radius to: ${activeRadius} miles.`, "info");
                 updateMapContext();
                 reconnectAisStream();
@@ -1050,6 +1316,29 @@
             document.getElementById('btn-manual-loc').addEventListener('click', () => {
                 modal.classList.remove('hidden');
                 modal.classList.add('flex');
+                initLocationPickerMap();
+                setLocationPickerCenter(userLocation.lat, userLocation.lon, 11);
+                setTimeout(() => {
+                    if (locationPickerMap) locationPickerMap.invalidateSize();
+                }, 50);
+            });
+
+            document.getElementById('btn-location-search').addEventListener('click', searchLocationFromInput);
+            document.getElementById('location-search-input').addEventListener('keydown', (event) => {
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    searchLocationFromInput();
+                }
+            });
+
+            ['manual-lat', 'manual-lon'].forEach((fieldId) => {
+                document.getElementById(fieldId).addEventListener('change', () => {
+                    const latInput = Number(document.getElementById('manual-lat').value);
+                    const lonInput = Number(document.getElementById('manual-lon').value);
+                    if (isValidCoordinate(latInput, lonInput)) {
+                        setLocationPickerCenter(latInput, lonInput, locationPickerMap ? locationPickerMap.getZoom() : 11);
+                    }
+                });
             });
             
             document.getElementById('btn-coords-cancel').addEventListener('click', () => {
@@ -1069,7 +1358,9 @@
 
                 userLocation.lat = latInput;
                 userLocation.lon = lonInput;
+                setLocationPickerCenter(latInput, lonInput, locationPickerMap ? locationPickerMap.getZoom() : 11);
                 locationAcquired = true;
+                saveUserPreferences();
                 isSimulatingDemo = false; // Turn off demo context if center relocates
                 hideHUD();
                 
@@ -1100,6 +1391,7 @@
                         clearTimeout(refreshTimeoutId);
                         refreshTimeoutId = null;
                     }
+                    saveUserPreferences();
                     logger.add("Automatic live telemetry scan loop paused.", "warning");
                     showNotification('Updates Suspended', 'Automatic live telemetry scanning paused.', 'warning');
                 } else {
@@ -1108,6 +1400,7 @@
                     btnRefresh.classList.replace('text-slate-400', 'text-radar-glow');
                     btnRefresh.classList.replace('border-slate-700', 'border-radar-glow/30');
                     timerTxt.innerText = "Auto Updates ON";
+                    saveUserPreferences();
                     logger.add("Automatic 10-second sweep timer re-engaged.", "info");
                     showNotification('Updates Resumed', 'Engaging live scans every 10 seconds.', 'success');
                     pollRadarSkies();
@@ -1153,6 +1446,7 @@
                 } else {
                     btn.classList.remove('bg-radar-glow/20', 'border-radar-glow', 'text-white');
                 }
+                saveUserPreferences();
                 logger.add(`Filter state updated: ${filterKey} set to ${currentFilters[filterKey]}`, "info");
                 renderFilteredState();
             });
@@ -1163,12 +1457,8 @@
             const btn = document.getElementById(elementId);
             btn.addEventListener('click', () => {
                 currentFilters[filterKey] = !currentFilters[filterKey];
-                btn.setAttribute('aria-pressed', String(currentFilters[filterKey]));
-                if (currentFilters[filterKey]) {
-                    btn.classList.remove('opacity-45', 'grayscale', 'line-through', 'bg-slate-900', 'border-slate-600', 'text-slate-500');
-                } else {
-                    btn.classList.add('opacity-45', 'grayscale', 'line-through', 'bg-slate-900', 'border-slate-600', 'text-slate-500');
-                }
+                updateVisibilityToggleButton(btn, currentFilters[filterKey]);
+                saveUserPreferences();
                 logger.add(`Visibility updated: ${label} ${currentFilters[filterKey] ? 'shown' : 'hidden'}.`, "info");
                 renderFilteredState();
             });
@@ -1185,6 +1475,7 @@
                 });
                 btn.classList.add('text-radar-glow', 'font-bold');
                 currentFilters.sortBy = sortValue;
+                saveUserPreferences();
                 logger.add(`Sort parameter changed to focus: ${sortValue}`, "info");
                 renderFilteredState();
             });
@@ -1192,8 +1483,7 @@
 
         // Preset Coordinator utility
         function setPresetCoords(lat, lon, label) {
-            document.getElementById('manual-lat').value = lat.toFixed(5);
-            document.getElementById('manual-lon').value = lon.toFixed(5);
+            setLocationPickerCenter(lat, lon, 13);
             logger.add(`Copied coordinate parameters for Preset: ${label}`, "info");
             showNotification('Preset Loaded', `Coordinates loaded for ${label}. Click Apply to adjust radar view!`, 'info');
         }
@@ -1574,6 +1864,16 @@
             return { minLat: Math.max(-90, lat - latDelta), minLon: Math.max(-180, lon - lonDelta), maxLat: Math.min(90, lat + latDelta), maxLon: Math.min(180, lon + lonDelta) };
         }
 
+
+        function isPlaneVisibleByShowControls(plane) {
+            if (!plane) return false;
+            if (!currentFilters.showMilitary && plane.isMilitary) return false;
+            if (!currentFilters.showEmergency && plane.isEmergency) return false;
+            if (!currentFilters.showGround && plane.alt_baro === "ground") return false;
+            if (!currentFilters.showAirborne && plane.alt_baro !== "ground") return false;
+            return true;
+        }
+
         // Apply filters & render aircraft list and markers
         function renderFilteredState() {
             // Filter array
@@ -1601,11 +1901,8 @@
                     if (!matchHex && !matchFlight && !matchType && !matchReg) return false;
                 }
 
-                // Top bar visibility flags remove whole categories from the map and list
-                if (!currentFilters.showMilitary && plane.isMilitary) return false;
-                if (!currentFilters.showEmergency && plane.isEmergency) return false;
-                if (!currentFilters.showGround && plane.alt_baro === "ground") return false;
-                if (!currentFilters.showAirborne && plane.alt_baro !== "ground") return false;
+                // Top bar visibility flags remove whole categories from the map, list, and cockpit traffic view
+                if (!isPlaneVisibleByShowControls(plane)) return false;
 
                 // Sidebar focus filters narrow the already visible aircraft set
                 if (currentFilters.milOnly && !plane.isMilitary) return false;
@@ -1649,11 +1946,11 @@
             
             // Ensure HUD remains updated with live moving data if a target is actively selected
             if (activeSelectedHex) {
-                const livePlane = aircraftList.find(p => p.hex === activeSelectedHex);
+                const livePlane = filtered.find(p => p.hex === activeSelectedHex);
                 if (livePlane) {
                     showHUD(livePlane);
                 } else {
-                    hideHUD(); // Plane flew out of range
+                    hideHUD(); // Plane flew out of range or was hidden by the SHOW controls
                 }
             }
         }
@@ -1852,7 +2149,8 @@
             const runways = cockpitRunwayCache.get(runwayCacheKey) || [];
             requestCockpitRunways(selectedPlane, runwayCacheKey);
 
-            const traffic = aircraftList
+            const visibleCockpitPlanes = lastRenderedPlanes.length ? lastRenderedPlanes : aircraftList.filter(isPlaneVisibleByShowControls);
+            const traffic = visibleCockpitPlanes
                 .filter(plane => isCockpitTrafficCandidate(plane, selectedPlane))
                 .map(plane => {
                     const distance = getHaversineDistance(selectedPlane.lat, selectedPlane.lon, plane.lat, plane.lon);
@@ -1866,7 +2164,7 @@
                 .sort((a, b) => a.distance - b.distance);
 
             const shipsInView = getCockpitShipsInView(selectedPlane, heading);
-            document.getElementById('cockpit-range').innerText = `FWD ${cockpitForwardFovDegrees}° · ${cockpitRangeMiles} MI${shipsInView.length ? ` · ${shipsInView.length} AIS` : ''}`;
+            document.getElementById('cockpit-range').innerText = `FWD ${cockpitForwardFovDegrees}° · ${cockpitRangeMiles} MI · ${traffic.length} VISIBLE${shipsInView.length ? ` · ${shipsInView.length} AIS` : ''}`;
 
             const attitude = getEstimatedAttitude(selectedPlane);
             drawCockpitCanvas(canvas, selectedPlane, traffic, heading, runways, shipsInView, attitude);
@@ -1961,11 +2259,32 @@
         }
 
         async function requestCockpitRunways(selectedPlane, cacheKey) {
-            if (cockpitRunwayCache.has(cacheKey) || cockpitRunwayRequests.has(cacheKey)) return;
+            if (cockpitRunwayCache.has(cacheKey)) {
+                logger.add(`Cockpit runway lookup skipped; cache hit for ${cacheKey}.`, 'info', {
+                    cacheKey,
+                    cachedRunways: cockpitRunwayCache.get(cacheKey)?.length || 0
+                });
+                return;
+            }
+            if (cockpitRunwayRequests.has(cacheKey)) {
+                logger.add(`Cockpit runway lookup already in flight for ${cacheKey}.`, 'info', { cacheKey });
+                return;
+            }
             cockpitRunwayRequests.add(cacheKey);
 
             const radiusMeters = Math.round(cockpitRunwayRangeMiles * 1609.344);
-            const query = `[out:json][timeout:8];way["aeroway"="runway"](around:${radiusMeters},${selectedPlane.lat},${selectedPlane.lon});out tags center geom;`;
+            const query = `[out:json][timeout:12];(way["aeroway"="runway"](around:${radiusMeters},${selectedPlane.lat},${selectedPlane.lon});relation["aeroway"="runway"](around:${radiusMeters},${selectedPlane.lat},${selectedPlane.lon}););out tags center geom;`;
+            const startedAt = performance.now();
+            logger.add(`Cockpit runway lookup started for ${cacheKey}.`, 'info', {
+                endpoint: cockpitRunwayEndpoint,
+                cacheKey,
+                selectedAircraft: selectedPlane.hex || selectedPlane.flight || 'unknown',
+                latitude: selectedPlane.lat,
+                longitude: selectedPlane.lon,
+                radiusMiles: cockpitRunwayRangeMiles,
+                radiusMeters,
+                query
+            });
 
             try {
                 const response = await fetch(cockpitRunwayEndpoint, {
@@ -1973,10 +2292,38 @@
                     headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
                     body: new URLSearchParams({ data: query })
                 });
-                if (!response.ok) throw new Error(`Overpass responded ${response.status}`);
-                const data = await response.json();
-                const runways = parseCockpitRunways(data.elements || []);
+                const durationMs = Math.round(performance.now() - startedAt);
+                const contentType = response.headers.get('content-type') || 'unknown';
+                const responseText = await response.text();
+                if (!response.ok) {
+                    throw new Error(`Overpass responded ${response.status} ${response.statusText || ''}`.trim(), {
+                        cause: { status: response.status, contentType, responsePreview: responseText.slice(0, 500), durationMs }
+                    });
+                }
+
+                let data;
+                try {
+                    data = JSON.parse(responseText);
+                } catch (parseError) {
+                    throw new Error(`Overpass returned non-JSON runway data: ${parseError.message}`, {
+                        cause: { contentType, responsePreview: responseText.slice(0, 500), durationMs }
+                    });
+                }
+
+                const elements = Array.isArray(data.elements) ? data.elements : [];
+                const parseDiagnostics = { skippedMissingGeometry: 0, skippedInvalidCoordinates: 0 };
+                const runways = parseCockpitRunways(elements, parseDiagnostics);
                 cockpitRunwayCache.set(cacheKey, runways);
+                logger.add(`Cockpit runway lookup completed: ${runways.length} runway(s) parsed from ${elements.length} Overpass element(s).`, runways.length ? 'success' : 'warning', {
+                    cacheKey,
+                    durationMs,
+                    status: response.status,
+                    contentType,
+                    elementCount: elements.length,
+                    parsedRunwayCount: runways.length,
+                    parseDiagnostics,
+                    sampleRunways: runways.slice(0, 5)
+                });
 
                 const activePlane = activeSelectedHex ? aircraftList.find(plane => plane.hex === activeSelectedHex) : null;
                 if (activePlane && getCockpitRunwayCacheKey(activePlane.lat, activePlane.lon) === cacheKey) {
@@ -1984,25 +2331,45 @@
                 }
             } catch (error) {
                 cockpitRunwayCache.set(cacheKey, []);
-                logger.add(`Cockpit runway overlay unavailable: ${error.message}`, 'warning');
+                logger.add(`Cockpit runway overlay unavailable: ${error.message}`, 'warning', {
+                    cacheKey,
+                    endpoint: cockpitRunwayEndpoint,
+                    selectedAircraft: selectedPlane.hex || selectedPlane.flight || 'unknown',
+                    latitude: selectedPlane.lat,
+                    longitude: selectedPlane.lon,
+                    radiusMiles: cockpitRunwayRangeMiles,
+                    browserOnline: navigator.onLine,
+                    errorName: error.name,
+                    errorMessage: error.message,
+                    errorCause: error.cause || null,
+                    stack: error.stack
+                });
             } finally {
                 cockpitRunwayRequests.delete(cacheKey);
             }
         }
 
-        function parseCockpitRunways(elements) {
+        function parseCockpitRunways(elements, diagnostics = null) {
             return elements
                 .map(element => {
                     const geometry = Array.isArray(element.geometry) ? element.geometry : [];
-                    if (geometry.length < 2) return null;
+                    if (geometry.length < 2) {
+                        if (diagnostics) diagnostics.skippedMissingGeometry += 1;
+                        return null;
+                    }
                     const start = geometry[0];
                     const end = geometry[geometry.length - 1];
                     const center = element.center || geometry[Math.floor(geometry.length / 2)];
+                    if (![start.lat, start.lon, end.lat, end.lon, center.lat, center.lon].every(Number.isFinite)) {
+                        if (diagnostics) diagnostics.skippedInvalidCoordinates += 1;
+                        return null;
+                    }
                     const heading = getBearingDegrees(start.lat, start.lon, end.lat, end.lon);
                     const reciprocal = (heading + 180) % 360;
                     const lengthMiles = getHaversineDistance(start.lat, start.lon, end.lat, end.lon);
                     return {
                         id: element.id,
+                        type: element.type || 'way',
                         name: element.tags?.ref || element.tags?.name || 'RWY',
                         surface: element.tags?.surface || 'unknown',
                         centerLat: center.lat,
@@ -2703,7 +3070,7 @@
             // Highlight list selection
             renderListPanel(lastRenderedPlanes);
             
-            const plane = aircraftList.find(p => p.hex === hex);
+            const plane = lastRenderedPlanes.find(p => p.hex === hex);
             if (plane) showHUD(plane);
             syncMapMarkers(lastRenderedPlanes);
 

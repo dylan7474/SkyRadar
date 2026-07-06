@@ -6,13 +6,13 @@ The application is currently a static HTML app in `index.html` that loads its UI
 
 ## Features
 
-- Live nearby aircraft display using a configurable search radius.
+- Live nearby aircraft display using a configurable search radius that is remembered in the same browser.
 - Optional AISstream.io WebSocket overlay for vessels inside the same radar radius.
 - Interactive Leaflet map with custom aircraft markers and heading-aware styling.
-- Browser geolocation with manual coordinate override support.
+- Browser geolocation with a visual OpenStreetMap picker, place search, Google Maps/OpenStreetMap link parsing, and manual coordinate override support; the last radar center is saved locally for future sessions.
 - Sidebar aircraft list and system log views.
 - Auto-refresh controls for repeated traffic updates.
-- Top-bar visibility toggles for hiding military, emergency, grounded, or airborne aircraft categories from the map and list.
+- Top-bar visibility toggles for hiding military, emergency, grounded, or airborne aircraft categories from the map and list, with preferences saved between sessions.
 - Cockpit view with synthetic runway cues sourced from nearby OpenStreetMap aeroway data when available, plus forward AIS ship cues when vessels are in range.
 - Dark tactical HUD-style interface optimized for quick scanning.
 
@@ -47,16 +47,22 @@ http://localhost:8000
 - **Show Military / Emergency / Grounded / Airborne**: Toggle these top-bar buttons off to de-select those aircraft categories from both the map and aircraft list.
 - **Show Panel / Hide Panel**: Toggle the aircraft and system log sidebar.
 - **Zoom + / −**: Adjust the map zoom level.
-- **Adjust Location**: Enter coordinates manually when you do not want to use browser geolocation or need to scan another area.
+- **Adjust Location**: Search for a place, paste a Google Maps or OpenStreetMap link, click the OpenStreetMap selector map, choose a preset, or enter coordinates manually when you do not want to use browser geolocation or need to scan another area.
 - **Auto Updates**: Use the refresh control to keep nearby aircraft data current.
 - **AIS Ships OFF / ON**: Enter your own AISstream.io API key to subscribe to live vessel position reports for the current radar range. The key is stored only in your browser localStorage; no API keys are committed or bundled.
 - **Aircraft View**: Review detected aircraft and select entries for more detail. Selecting an aircraft opens the cockpit view, which attempts to draw nearby airport runways in the forward window when OpenStreetMap aeroway data is available and overlays AIS vessels that fall within the pilot-relative forward display range.
 - **System Logs**: Inspect app messages, API status, and warnings.
 
+
+## Saved Browser Preferences
+
+SkyRadar stores user preferences in the same browser using `localStorage` so repeated visits on the same machine keep the previous setup. Saved preferences include the last radar center, selected radius, auto-update state, search/filter settings, sort order, aircraft visibility toggles, and AIS enablement/API key settings. These values stay local to your browser and are not committed to the repository or sent to any SkyRadar backend.
+
 ## Data Sources and Limitations
 
 - Aircraft traffic uses public ADS-B-derived data sources from the browser.
 - Ship traffic uses AISstream.io over a browser WebSocket when you enable AIS and provide your own API key. SkyRadar subscribes to a bounding box around the selected radar center and filters vessels to the configured circular range.
+- The location search and picker use OpenStreetMap tiles and Nominatim search from the browser; search availability depends on network access and public service limits.
 - Cockpit runway cues query OpenStreetMap Overpass for nearby `aeroway=runway` geometry and render a simplified synthetic view; runway availability depends on network access, Overpass rate limits, and OpenStreetMap coverage.
 
 ## Roadmap
@@ -64,7 +70,7 @@ http://localhost:8000
 - Add a small automated test suite for UI behavior and data parsing.
 - Split the single-page implementation into maintainable modules.
 - Add user-configurable data sources and API settings.
-- Persist preferred radius, map style, and last manual location.
+- Add user-configurable map style presets.
 - Improve mobile layout and accessibility for keyboard and screen-reader users.
 
 ## License
