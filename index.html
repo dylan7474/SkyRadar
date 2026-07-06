@@ -629,22 +629,11 @@
         });
 
         // State variables
-        let userLocation = { lat: 51.5074, lon: -0.1278 }; // Default London
-        let activeRadius = 50; // Statute miles
-        let autoRefreshInterval = 10000; // 10s refresh loop
-        let isAutoRefreshing = true;
-        let map = null;
-        let userMarker = null;
-        let radarCircle = null;
-        let aircraftList = [];
-        let shipList = [];
-        let lastRenderedPlanes = [];
-        let mapMarkers = {}; // Map of target IDs to leaflet markers
-        let shipMarkers = {};
-        let aisSocket = null;
-        let aisApiKey = localStorage.getItem('skyradar_aisstream_api_key') || '';
-        let aisEnabled = localStorage.getItem('skyradar_aisstream_enabled') === 'true';
-        let currentFilters = {
+        const PREFERENCES_STORAGE_KEY = 'skyradar_user_preferences_v1';
+        const DEFAULT_USER_LOCATION = { lat: 51.5074, lon: -0.1278 }; // Default London
+        const DEFAULT_RADIUS = 50; // Statute miles
+        const ALLOWED_RADII = [10, 25, 50, 100, 150];
+        const DEFAULT_FILTERS = {
             search: '',
             milOnly: false,
             emergencyOnly: false,
@@ -656,6 +645,23 @@
             showGround: true,
             showAirborne: true
         };
+        const savedPreferences = loadUserPreferences();
+        let userLocation = savedPreferences.userLocation || { ...DEFAULT_USER_LOCATION };
+        let activeRadius = savedPreferences.activeRadius || DEFAULT_RADIUS;
+        let autoRefreshInterval = 10000; // 10s refresh loop
+        let isAutoRefreshing = savedPreferences.isAutoRefreshing ?? true;
+        let map = null;
+        let userMarker = null;
+        let radarCircle = null;
+        let aircraftList = [];
+        let shipList = [];
+        let lastRenderedPlanes = [];
+        let mapMarkers = {}; // Map of target IDs to leaflet markers
+        let shipMarkers = {};
+        let aisSocket = null;
+        let aisApiKey = localStorage.getItem('skyradar_aisstream_api_key') || '';
+        let aisEnabled = localStorage.getItem('skyradar_aisstream_enabled') === 'true';
+        let currentFilters = { ...DEFAULT_FILTERS, ...(savedPreferences.filters || {}) };
         let refreshTimeoutId = null;
         let locationAcquired = false;
         let isSimulatingDemo = false;
@@ -667,6 +673,144 @@
         const cockpitRunwayRequests = new Set();
         const cockpitRunwayEndpoint = 'https://overpass-api.de/api/interpreter';
         const cockpitTrackHistory = {};
+
+        function isValidCoordinate(lat, lon) {
+            return Number.isFinite(lat) && Number.isFinite(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180;
+        }
+
+        function loadUserPreferences() {
+            const fallback = {};
+            try {
+                const rawPreferences = localStorage.getItem(PREFERENCES_STORAGE_KEY);
+                if (!rawPreferences) return fallback;
+
+                const parsed = JSON.parse(rawPreferences);
+                const nextPreferences = {};
+
+                if (parsed.userLocation && isValidCoordinate(Number(parsed.userLocation.lat), Number(parsed.userLocation.lon))) {
+                    nextPreferences.userLocation = {
+                        lat: Number(parsed.userLocation.lat),
+                        lon: Number(parsed.userLocation.lon)
+                    };
+                }
+
+                const parsedRadius = Number(parsed.activeRadius);
+                if (ALLOWED_RADII.includes(parsedRadius)) {
+                    nextPreferences.activeRadius = parsedRadius;
+                }
+
+                if (typeof parsed.isAutoRefreshing === 'boolean') {
+                    nextPreferences.isAutoRefreshing = parsed.isAutoRefreshing;
+                }
+
+                if (parsed.filters && typeof parsed.filters === 'object') {
+                    nextPreferences.filters = {};
+                    Object.keys(DEFAULT_FILTERS).forEach((key) => {
+                        if (typeof DEFAULT_FILTERS[key] === 'boolean' && typeof parsed.filters[key] === 'boolean') {
+                            nextPreferences.filters[key] = parsed.filters[key];
+                        }
+                    });
+                    if (['dist', 'alt', 'speed'].includes(parsed.filters.sortBy)) {
+                        nextPreferences.filters.sortBy = parsed.filters.sortBy;
+                    }
+                    if (typeof parsed.filters.search === 'string') {
+                        nextPreferences.filters.search = parsed.filters.search.slice(0, 80);
+                    }
+                }
+
+                return nextPreferences;
+            } catch (error) {
+                logger.add('Stored preferences could not be loaded. Starting with defaults.', 'warning', error);
+                return fallback;
+            }
+        }
+
+        function saveUserPreferences() {
+            const preferences = {
+                userLocation: { ...userLocation },
+                activeRadius,
+                isAutoRefreshing,
+                filters: { ...currentFilters }
+            };
+
+            try {
+                localStorage.setItem(PREFERENCES_STORAGE_KEY, JSON.stringify(preferences));
+            } catch (error) {
+                logger.add('Browser storage rejected preference updates for this session.', 'warning', error);
+            }
+        }
+
+        function applyPersistedControlState() {
+            const radiusSelect = document.getElementById('radius-select');
+            if (radiusSelect) radiusSelect.value = String(activeRadius);
+
+            const searchInput = document.getElementById('search-input');
+            if (searchInput) searchInput.value = currentFilters.search;
+
+            document.getElementById('manual-lat').value = userLocation.lat.toFixed(5);
+            document.getElementById('manual-lon').value = userLocation.lon.toFixed(5);
+
+            ['milOnly', 'emergencyOnly', 'groundOnly', 'airborneOnly'].forEach((filterKey) => {
+                const filterButtonMap = {
+                    milOnly: 'toggle-mil',
+                    emergencyOnly: 'toggle-emergency',
+                    groundOnly: 'toggle-ground',
+                    airborneOnly: 'toggle-airborne'
+                };
+                const button = document.getElementById(filterButtonMap[filterKey]);
+                if (button && currentFilters[filterKey]) {
+                    button.classList.add('bg-radar-glow/20', 'border-radar-glow', 'text-white');
+                }
+            });
+
+            ['showMilitary', 'showEmergency', 'showGround', 'showAirborne'].forEach((filterKey) => {
+                const visibilityButtonMap = {
+                    showMilitary: 'show-military',
+                    showEmergency: 'show-emergency',
+                    showGround: 'show-ground',
+                    showAirborne: 'show-airborne'
+                };
+                updateVisibilityToggleButton(document.getElementById(visibilityButtonMap[filterKey]), currentFilters[filterKey]);
+            });
+
+            ['sort-dist', 'sort-alt', 'sort-speed'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) {
+                    el.classList.remove('text-radar-glow', 'font-bold');
+                    el.classList.add('hover:text-slate-200');
+                }
+            });
+            const activeSortButton = document.getElementById(`sort-${currentFilters.sortBy}`);
+            if (activeSortButton) {
+                activeSortButton.classList.add('text-radar-glow', 'font-bold');
+            }
+
+            updateAutoRefreshButtonState();
+        }
+
+        function updateVisibilityToggleButton(btn, isEnabled) {
+            if (!btn) return;
+            btn.setAttribute('aria-pressed', String(isEnabled));
+            if (isEnabled) {
+                btn.classList.remove('opacity-45', 'grayscale', 'line-through', 'bg-slate-900', 'border-slate-600', 'text-slate-500');
+            } else {
+                btn.classList.add('opacity-45', 'grayscale', 'line-through', 'bg-slate-900', 'border-slate-600', 'text-slate-500');
+            }
+        }
+
+        function updateAutoRefreshButtonState() {
+            const btnRefresh = document.getElementById('btn-refresh');
+            const timerTxt = document.getElementById('refresh-timer-txt');
+            if (!btnRefresh || !timerTxt) return;
+
+            btnRefresh.classList.toggle('bg-radar-glow/10', isAutoRefreshing);
+            btnRefresh.classList.toggle('text-radar-glow', isAutoRefreshing);
+            btnRefresh.classList.toggle('border-radar-glow/30', isAutoRefreshing);
+            btnRefresh.classList.toggle('bg-slate-800/80', !isAutoRefreshing);
+            btnRefresh.classList.toggle('text-slate-400', !isAutoRefreshing);
+            btnRefresh.classList.toggle('border-slate-700', !isAutoRefreshing);
+            timerTxt.innerText = isAutoRefreshing ? 'Auto Updates ON' : 'Auto Updates OFF';
+        }
 
         function getShipId(ship) {
             return `ship-${ship.mmsi || ship.id}`;
@@ -751,6 +895,7 @@
         // Initialize App on DOM Loaded
         document.addEventListener('DOMContentLoaded', () => {
             logger.add("SkyRadar launched. Initializing mapping engines...", "info");
+            applyPersistedControlState();
             initLeafletMap();
             requestUserLocation();
             setupEventListeners();
@@ -841,6 +986,7 @@
                         userLocation.lat = position.coords.latitude;
                         userLocation.lon = position.coords.longitude;
                         locationAcquired = true;
+                        saveUserPreferences();
                         
                         logger.add(`Geolocation successful. Center synchronized: ${userLocation.lat}, ${userLocation.lon}`, "success");
                         updateGeoStatusIndicator('success', 'Location Detected');
@@ -857,8 +1003,9 @@
                     (error) => {
                         console.warn('Geolocation failed: ' + error.message);
                         locationAcquired = false;
-                        updateGeoStatusIndicator('error', 'Location Blocked (using default)');
-                        showNotification('GPS Blocked', 'Using default radar center (London). Click "Adjust Location" to select a preset or type in your coordinates!', 'warning');
+                        const usingSavedCenter = Boolean(savedPreferences.userLocation);
+                        updateGeoStatusIndicator('error', usingSavedCenter ? 'Location Blocked (using saved center)' : 'Location Blocked (using default)');
+                        showNotification('GPS Blocked', usingSavedCenter ? 'Using your saved radar center. Click "Adjust Location" to change it.' : 'Using default radar center (London). Click "Adjust Location" to select a preset or type in your coordinates!', 'warning');
                         
                         // Pre-populate defaults in manual modal anyway
                         document.getElementById('manual-lat').value = userLocation.lat.toFixed(5);
@@ -975,12 +1122,14 @@
             // Search Input listener
             document.getElementById('search-input').addEventListener('input', (e) => {
                 currentFilters.search = e.target.value.trim().toLowerCase();
+                saveUserPreferences();
                 renderFilteredState();
             });
 
             // Radius Selection Update
             document.getElementById('radius-select').addEventListener('change', (e) => {
                 activeRadius = parseInt(e.target.value, 10);
+                saveUserPreferences();
                 logger.add(`Recalibrating scanner sweep radius to: ${activeRadius} miles.`, "info");
                 updateMapContext();
                 reconnectAisStream();
@@ -1070,6 +1219,7 @@
                 userLocation.lat = latInput;
                 userLocation.lon = lonInput;
                 locationAcquired = true;
+                saveUserPreferences();
                 isSimulatingDemo = false; // Turn off demo context if center relocates
                 hideHUD();
                 
@@ -1100,6 +1250,7 @@
                         clearTimeout(refreshTimeoutId);
                         refreshTimeoutId = null;
                     }
+                    saveUserPreferences();
                     logger.add("Automatic live telemetry scan loop paused.", "warning");
                     showNotification('Updates Suspended', 'Automatic live telemetry scanning paused.', 'warning');
                 } else {
@@ -1108,6 +1259,7 @@
                     btnRefresh.classList.replace('text-slate-400', 'text-radar-glow');
                     btnRefresh.classList.replace('border-slate-700', 'border-radar-glow/30');
                     timerTxt.innerText = "Auto Updates ON";
+                    saveUserPreferences();
                     logger.add("Automatic 10-second sweep timer re-engaged.", "info");
                     showNotification('Updates Resumed', 'Engaging live scans every 10 seconds.', 'success');
                     pollRadarSkies();
@@ -1153,6 +1305,7 @@
                 } else {
                     btn.classList.remove('bg-radar-glow/20', 'border-radar-glow', 'text-white');
                 }
+                saveUserPreferences();
                 logger.add(`Filter state updated: ${filterKey} set to ${currentFilters[filterKey]}`, "info");
                 renderFilteredState();
             });
@@ -1163,12 +1316,8 @@
             const btn = document.getElementById(elementId);
             btn.addEventListener('click', () => {
                 currentFilters[filterKey] = !currentFilters[filterKey];
-                btn.setAttribute('aria-pressed', String(currentFilters[filterKey]));
-                if (currentFilters[filterKey]) {
-                    btn.classList.remove('opacity-45', 'grayscale', 'line-through', 'bg-slate-900', 'border-slate-600', 'text-slate-500');
-                } else {
-                    btn.classList.add('opacity-45', 'grayscale', 'line-through', 'bg-slate-900', 'border-slate-600', 'text-slate-500');
-                }
+                updateVisibilityToggleButton(btn, currentFilters[filterKey]);
+                saveUserPreferences();
                 logger.add(`Visibility updated: ${label} ${currentFilters[filterKey] ? 'shown' : 'hidden'}.`, "info");
                 renderFilteredState();
             });
@@ -1185,6 +1334,7 @@
                 });
                 btn.classList.add('text-radar-glow', 'font-bold');
                 currentFilters.sortBy = sortValue;
+                saveUserPreferences();
                 logger.add(`Sort parameter changed to focus: ${sortValue}`, "info");
                 renderFilteredState();
             });
