@@ -48,7 +48,7 @@ http://localhost:8000
 - **Show Panel / Hide Panel**: Toggle the aircraft and system log sidebar.
 - **Zoom + / −**: Adjust the map zoom level.
 - **Adjust Location**: Search for a place, paste a Google Maps or OpenStreetMap link, click the OpenStreetMap selector map, choose a preset, or enter coordinates manually when you do not want to use browser geolocation or need to scan another area.
-- **Auto Updates**: Use the refresh control to keep nearby aircraft data current. SkyRadar uses a 30-second baseline interval and backs off up to 2 minutes after repeated blocked fetches to reduce public API/CORS proxy throttling.
+- **Auto Updates**: Use the refresh control to keep nearby aircraft data current. SkyRadar uses a 30-second baseline interval and backs off up to 2 minutes after repeated blocked fetches to reduce public API/CORS proxy throttling. When all aircraft fetch pathways are temporarily cooling down, the status changes to `Cooling Down` and suppresses repeated browser notifications until a retry is due.
 - **AIS Ships OFF / ON**: Enter your own AISstream.io API key to subscribe to live vessel position reports for the current radar range. The key is stored only in your browser localStorage; no API keys are committed or bundled.
 - **Aircraft View**: Review detected aircraft and select entries for more detail. Selecting an aircraft opens the cockpit view, which attempts to draw nearby airport runways in the forward window when OpenStreetMap aeroway data is available and overlays AIS vessels that fall within the pilot-relative forward display range.
 - **System Logs**: Inspect app messages, API status, and warnings.
@@ -63,7 +63,7 @@ SkyRadar stores user preferences in the same browser using `localStorage` so rep
 - Aircraft traffic uses public ADS-B-derived data sources from the browser.
 - Ship traffic uses AISstream.io over a browser WebSocket when you enable AIS and provide your own API key. SkyRadar subscribes to a bounding box around the selected radar center and filters vessels to the configured circular range.
 - The location search and picker use OpenStreetMap tiles and Nominatim search from the browser; search availability depends on network access and public service limits.
-- Cockpit runway cues query OpenStreetMap Overpass for nearby `aeroway=runway` geometry and render a simplified synthetic view; runway availability depends on network access, Overpass rate limits, and OpenStreetMap coverage.
+- Cockpit runway cues query OpenStreetMap Overpass for nearby `aeroway=runway` geometry and render a simplified synthetic view; runway availability depends on network access, Overpass rate limits, and OpenStreetMap coverage. Failed runway lookups are cached for the current cockpit area and pause additional Overpass requests briefly so selecting multiple aircraft does not repeatedly hammer a blocked endpoint.
 
 ## Roadmap
 

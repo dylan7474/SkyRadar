@@ -689,7 +689,10 @@
         const cockpitRunwayRangeMiles = 18;
         const cockpitRunwayCache = new Map();
         const cockpitRunwayRequests = new Set();
+        let cockpitRunwayLookupPausedUntil = 0;
         const cockpitRunwayEndpoint = 'https://overpass-api.de/api/interpreter';
+        const cockpitRunwayFetchTimeoutMs = 8000;
+        const cockpitRunwayFailurePauseMs = 120000;
         const cockpitTrackHistory = {};
 
         function isValidCoordinate(lat, lon) {
@@ -1569,9 +1572,15 @@
                 consecutiveAdsBFailures += 1;
                 autoRefreshInterval = Math.min(BASE_AUTO_REFRESH_INTERVAL * (2 ** Math.min(consecutiveAdsBFailures - 1, 2)), MAX_AUTO_REFRESH_INTERVAL);
 
-                logger.add(`🚨 LIVE TELEMETRY UNAVAILABLE: ${error.message || 'All ADS-B fetch strategies failed'}. SkyRadar is backing off to ${Math.round(autoRefreshInterval / 1000)}s between retries to reduce repeated blocks. This can be caused by CORS proxy rate limits, public API downtime, browser privacy shields, ad blockers, or a temporary network issue. Use Demo Mode to verify map rendering.`, "error");
+                const isCoolingDown = error.code === 'ADSB_COOLDOWN';
+                const logLevel = isCoolingDown ? 'warning' : 'error';
+                const statusText = isCoolingDown ? 'Cooling Down' : 'Network Blocked';
+                const statusClass = isCoolingDown ? 'text-amber-500 font-bold' : 'text-rose-500 font-bold';
+                document.getElementById('radar-lbl-status').innerText = statusText;
+                document.getElementById('radar-lbl-status').className = statusClass;
+                logger.add(`🚨 LIVE TELEMETRY UNAVAILABLE: ${error.message || 'All ADS-B fetch strategies failed'}. SkyRadar is backing off to ${Math.round(autoRefreshInterval / 1000)}s between retries to reduce repeated blocks. This can be caused by CORS proxy rate limits, public API downtime, browser privacy shields, ad blockers, or a temporary network issue. Use Demo Mode to verify map rendering.`, logLevel);
 
-                showNotification('Live telemetry unavailable', `Fetch blocked. Retrying in ${Math.round(autoRefreshInterval / 1000)}s; try Demo Mode to verify rendering.`, 'danger');
+                if (!isCoolingDown) showNotification('Live telemetry unavailable', `Fetch blocked. Retrying in ${Math.round(autoRefreshInterval / 1000)}s; try Demo Mode to verify rendering.`, 'danger');
             } finally {
                 if (icon) icon.classList.remove('animate-spin');
 
@@ -1687,7 +1696,9 @@
                 const soonestRetryAt = Math.min(...fetchStrategies.map(strategy => adsBFetchStrategyCooldowns.get(strategy.name) || now));
                 const waitSeconds = Math.max(1, Math.ceil((soonestRetryAt - now) / 1000));
                 logger.add(`All ADS-B fetch pathways are cooling down after recent failures; skipping this sweep for ${waitSeconds}s instead of forcing more blocked requests.`, "warning");
-                throw new Error(`ADS-B pathways cooling down; retry in ${waitSeconds}s`);
+                const cooldownError = new Error(`ADS-B pathways cooling down; retry in ${waitSeconds}s`);
+                cooldownError.code = 'ADSB_COOLDOWN';
+                throw cooldownError;
             }
 
             const prioritizedStrategies = [...availableStrategies].sort((a, b) => {
@@ -2338,6 +2349,17 @@
         }
 
         async function requestCockpitRunways(selectedPlane, cacheKey) {
+            const now = Date.now();
+            if (cockpitRunwayLookupPausedUntil > now) {
+                const waitSeconds = Math.ceil((cockpitRunwayLookupPausedUntil - now) / 1000);
+                if (!cockpitRunwayCache.has(cacheKey)) cockpitRunwayCache.set(cacheKey, []);
+                logger.add(`Cockpit runway lookup skipped; Overpass lookups cooling down for ${waitSeconds}s after a recent network failure.`, 'warning', {
+                    cacheKey,
+                    retryInSeconds: waitSeconds
+                });
+                return;
+            }
+
             if (cockpitRunwayCache.has(cacheKey)) {
                 logger.add(`Cockpit runway lookup skipped; cache hit for ${cacheKey}.`, 'info', {
                     cacheKey,
@@ -2365,11 +2387,15 @@
                 query
             });
 
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), cockpitRunwayFetchTimeoutMs);
+
             try {
                 const response = await fetch(cockpitRunwayEndpoint, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
-                    body: new URLSearchParams({ data: query })
+                    body: new URLSearchParams({ data: query }),
+                    signal: controller.signal
                 });
                 const durationMs = Math.round(performance.now() - startedAt);
                 const contentType = response.headers.get('content-type') || 'unknown';
@@ -2409,8 +2435,10 @@
                     updateCockpitView(activePlane);
                 }
             } catch (error) {
+                const errorMessage = error.name === 'AbortError' ? `Timed out after ${cockpitRunwayFetchTimeoutMs / 1000}s` : error.message;
                 cockpitRunwayCache.set(cacheKey, []);
-                logger.add(`Cockpit runway overlay unavailable: ${error.message}`, 'warning', {
+                cockpitRunwayLookupPausedUntil = Date.now() + cockpitRunwayFailurePauseMs;
+                logger.add(`Cockpit runway overlay unavailable: ${errorMessage}. Pausing Overpass lookups for ${cockpitRunwayFailurePauseMs / 1000}s.`, 'warning', {
                     cacheKey,
                     endpoint: cockpitRunwayEndpoint,
                     selectedAircraft: selectedPlane.hex || selectedPlane.flight || 'unknown',
@@ -2419,11 +2447,12 @@
                     radiusMiles: cockpitRunwayRangeMiles,
                     browserOnline: navigator.onLine,
                     errorName: error.name,
-                    errorMessage: error.message,
+                    errorMessage,
                     errorCause: error.cause || null,
                     stack: error.stack
                 });
             } finally {
+                clearTimeout(timeoutId);
                 cockpitRunwayRequests.delete(cacheKey);
             }
         }
