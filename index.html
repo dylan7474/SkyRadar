@@ -690,6 +690,9 @@
         const cockpitRunwayRangeMiles = 18;
         const cockpitRunwayCache = new Map();
         const cockpitRunwayRequests = new Set();
+        const cockpitRunwayCacheHitLogs = new Set();
+        const cockpitRunwayInFlightLogs = new Set();
+        const cockpitRunwayCooldownLogs = new Map();
         let cockpitRunwayLookupPausedUntil = 0;
         const cockpitRunwayEndpoint = 'https://overpass-api.de/api/interpreter';
         const cockpitRunwayFetchTimeoutMs = 8000;
@@ -2365,26 +2368,36 @@
             const now = Date.now();
             if (cockpitRunwayLookupPausedUntil > now) {
                 const waitSeconds = Math.ceil((cockpitRunwayLookupPausedUntil - now) / 1000);
-                if (!cockpitRunwayCache.has(cacheKey)) cockpitRunwayCache.set(cacheKey, []);
-                logger.add(`Cockpit runway lookup skipped; Overpass lookups cooling down for ${waitSeconds}s after a recent network failure.`, 'warning', {
-                    cacheKey,
-                    retryInSeconds: waitSeconds
-                });
+                const cooldownLoggedUntil = cockpitRunwayCooldownLogs.get(cacheKey) || 0;
+                if (cooldownLoggedUntil !== cockpitRunwayLookupPausedUntil) {
+                    cockpitRunwayCooldownLogs.set(cacheKey, cockpitRunwayLookupPausedUntil);
+                    logger.add(`Cockpit runway lookup skipped; Overpass lookups cooling down for ${waitSeconds}s after a recent network failure.`, 'warning', {
+                        cacheKey,
+                        retryInSeconds: waitSeconds
+                    });
+                }
                 return;
             }
 
             if (cockpitRunwayCache.has(cacheKey)) {
-                logger.add(`Cockpit runway lookup skipped; cache hit for ${cacheKey}.`, 'info', {
-                    cacheKey,
-                    cachedRunways: cockpitRunwayCache.get(cacheKey)?.length || 0
-                });
+                if (!cockpitRunwayCacheHitLogs.has(cacheKey)) {
+                    cockpitRunwayCacheHitLogs.add(cacheKey);
+                    logger.add(`Cockpit runway lookup skipped; cache hit for ${cacheKey}.`, 'info', {
+                        cacheKey,
+                        cachedRunways: cockpitRunwayCache.get(cacheKey)?.length || 0
+                    });
+                }
                 return;
             }
             if (cockpitRunwayRequests.has(cacheKey)) {
-                logger.add(`Cockpit runway lookup already in flight for ${cacheKey}.`, 'info', { cacheKey });
+                if (!cockpitRunwayInFlightLogs.has(cacheKey)) {
+                    cockpitRunwayInFlightLogs.add(cacheKey);
+                    logger.add(`Cockpit runway lookup already in flight for ${cacheKey}.`, 'info', { cacheKey });
+                }
                 return;
             }
             cockpitRunwayRequests.add(cacheKey);
+            cockpitRunwayInFlightLogs.delete(cacheKey);
 
             const radiusMeters = Math.round(cockpitRunwayRangeMiles * 1609.344);
             const query = `[out:json][timeout:12];(way["aeroway"="runway"](around:${radiusMeters},${selectedPlane.lat},${selectedPlane.lon});relation["aeroway"="runway"](around:${radiusMeters},${selectedPlane.lat},${selectedPlane.lon}););out tags center geom;`;
@@ -2432,6 +2445,7 @@
                 const parseDiagnostics = { skippedMissingGeometry: 0, skippedInvalidCoordinates: 0 };
                 const runways = parseCockpitRunways(elements, parseDiagnostics);
                 cockpitRunwayCache.set(cacheKey, runways);
+                cockpitRunwayCacheHitLogs.delete(cacheKey);
                 logger.add(`Cockpit runway lookup completed: ${runways.length} runway(s) parsed from ${elements.length} Overpass element(s).`, runways.length ? 'success' : 'warning', {
                     cacheKey,
                     durationMs,
@@ -2450,6 +2464,8 @@
             } catch (error) {
                 const errorMessage = error.name === 'AbortError' ? `Timed out after ${cockpitRunwayFetchTimeoutMs / 1000}s` : error.message;
                 cockpitRunwayCache.set(cacheKey, []);
+                cockpitRunwayCacheHitLogs.delete(cacheKey);
+                cockpitRunwayCooldownLogs.clear();
                 cockpitRunwayLookupPausedUntil = Date.now() + cockpitRunwayFailurePauseMs;
                 logger.add(`Cockpit runway overlay unavailable: ${errorMessage}. Pausing Overpass lookups for ${cockpitRunwayFailurePauseMs / 1000}s.`, 'warning', {
                     cacheKey,
