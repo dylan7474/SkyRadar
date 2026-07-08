@@ -40,6 +40,17 @@ Then open:
 http://localhost:8000
 ```
 
+### Option 3: Deploy with Docker
+
+Use the included deployment script to build and run SkyRadar in an Nginx container. The script defaults to port `3017`, or you can pass a custom port as the first argument:
+
+```bash
+./deploy.sh
+./deploy.sh 8080
+```
+
+Then open `http://localhost:3017/` or the custom port you provided.
+
 ## Basic Controls
 
 - **Allow Location**: When prompted, allow browser geolocation so SkyRadar can center traffic around your current position.
