@@ -674,6 +674,7 @@
         let mapMarkers = {}; // Map of target IDs to leaflet markers
         let shipMarkers = {};
         let aisSocket = null;
+        let aisConnectionGeneration = 0;
         let aisApiKey = localStorage.getItem('skyradar_aisstream_api_key') || '';
         let aisEnabled = localStorage.getItem('skyradar_aisstream_enabled') === 'true';
         let currentFilters = { ...DEFAULT_FILTERS, ...(savedPreferences.filters || {}) };
@@ -1846,10 +1847,7 @@
                 connectAisStream();
                 showNotification('AIS Enabled', 'Listening for AISstream.io vessels inside the current radar range.', 'success');
             } else {
-                disconnectAisStream();
-                shipList = [];
-                syncShipMarkers([]);
-                renderFilteredState();
+                stopAisStream();
                 showNotification('AIS Disabled', 'Ship overlays have been removed from the map.', 'info');
             }
         }
@@ -1862,34 +1860,48 @@
             connectAisStream();
         }
 
+        function stopAisStream() {
+            aisConnectionGeneration += 1;
+            disconnectAisStream();
+            shipList = [];
+            syncShipMarkers([]);
+            renderFilteredState();
+        }
+
         function disconnectAisStream(clearHandlers = true) {
             if (!aisSocket) return;
+            const socketToClose = aisSocket;
             if (clearHandlers) {
-                aisSocket.onopen = null;
-                aisSocket.onmessage = null;
-                aisSocket.onerror = null;
-                aisSocket.onclose = null;
+                socketToClose.onopen = null;
+                socketToClose.onmessage = null;
+                socketToClose.onerror = null;
+                socketToClose.onclose = null;
             }
-            aisSocket.close();
-            aisSocket = null;
+            socketToClose.close();
+            if (aisSocket === socketToClose) aisSocket = null;
         }
 
         function connectAisStream() {
             if (!aisEnabled || !aisApiKey || aisSocket) return;
+            const connectionGeneration = aisConnectionGeneration;
             try {
                 const bounds = getRadarBoundingBox(userLocation.lat, userLocation.lon, activeRadius);
-                aisSocket = new WebSocket('wss://stream.aisstream.io/v0/stream');
-                aisSocket.onopen = () => {
-                    aisSocket.send(JSON.stringify({
+                const socket = new WebSocket('wss://stream.aisstream.io/v0/stream');
+                aisSocket = socket;
+                socket.onopen = () => {
+                    if (!aisEnabled || aisConnectionGeneration !== connectionGeneration || aisSocket !== socket) return;
+                    socket.send(JSON.stringify({
                         APIKey: aisApiKey,
                         BoundingBoxes: [[[bounds.minLat, bounds.minLon], [bounds.maxLat, bounds.maxLon]]],
                         FilterMessageTypes: ['PositionReport']
                     }));
                     logger.add(`AISstream.io vessel feed subscribed for ${activeRadius} mi radar range.`, 'success');
                 };
-                aisSocket.onmessage = async (event) => {
+                socket.onmessage = async (event) => {
+                    if (!aisEnabled || aisConnectionGeneration !== connectionGeneration || aisSocket !== socket) return;
                     try {
                         const payload = await parseAisMessageData(event.data);
+                        if (!aisEnabled || aisConnectionGeneration !== connectionGeneration || aisSocket !== socket) return;
                         const ship = normalizeAisMessage(payload);
                         if (!ship || ship.calculatedDistance > activeRadius) return;
                         upsertShip(ship);
@@ -1901,10 +1913,10 @@
                         });
                     }
                 };
-                aisSocket.onerror = () => logger.add('AISstream.io WebSocket reported an error. Verify your API key and browser WebSocket access.', 'warning');
-                aisSocket.onclose = () => {
-                    aisSocket = null;
-                    if (aisEnabled) logger.add('AISstream.io vessel feed closed. It will reconnect on the next radar refresh or range change.', 'warning');
+                socket.onerror = () => logger.add('AISstream.io WebSocket reported an error. Verify your API key and browser WebSocket access.', 'warning');
+                socket.onclose = () => {
+                    if (aisSocket === socket) aisSocket = null;
+                    if (aisEnabled && aisConnectionGeneration === connectionGeneration) logger.add('AISstream.io vessel feed closed. It will reconnect on the next radar refresh or range change.', 'warning');
                 };
             } catch (error) {
                 logger.add(`AISstream.io setup failed: ${error.message}`, 'error', error);
@@ -1967,7 +1979,7 @@
         // Apply filters & render aircraft list and markers
         function renderFilteredState() {
             // Filter array
-            let filteredShips = shipList.filter(ship => {
+            let filteredShips = aisEnabled ? shipList.filter(ship => {
                 if (ship.lat === undefined || ship.lon === undefined) return false;
                 if (ship.calculatedDistance > activeRadius) return false;
                 if (currentFilters.search) {
@@ -1976,7 +1988,7 @@
                 }
                 if (currentFilters.milOnly || currentFilters.emergencyOnly || currentFilters.groundOnly || currentFilters.airborneOnly) return false;
                 return true;
-            });
+            }) : [];
 
             let filtered = aircraftList.filter(plane => {
                 // Ignore planes with missing essential coordinate metrics
@@ -2265,6 +2277,7 @@
 
         function getCockpitShipsInView(selectedPlane, heading) {
             const ownshipAltitude = getPlaneAltitudeFeet(selectedPlane);
+            if (!aisEnabled) return [];
             return shipList
                 .filter(ship => ship.lat !== undefined && ship.lon !== undefined)
                 .map(ship => {
