@@ -171,7 +171,7 @@
            aircraft markers, range rings, and the user marker share the same
            coordinate plane. */
         #map .leaflet-tile-pane {
-            filter: saturate(0.85) contrast(1.08) brightness(0.78);
+            filter: contrast(1.25);
         }
 
         /* Radar sweep effect overlay */
@@ -1037,18 +1037,25 @@
             try {
                 // Instantiate the map centered initially on userLocation default
                 map = L.map('map', {
-                    zoomControl: false, // Disabled native controls to use custom header buttons
-                    attributionControl: false
+                    zoomControl: false // Disabled native controls to use custom header buttons
                 }).setView([userLocation.lat, userLocation.lon], 9);
+                map.attributionControl.setPrefix(false);
 
                 // Click away on map hides the custom HUD panel
                 map.on('click', () => {
                     hideHUD();
                 });
 
-                // Leaflet dark theme tile layer - CartoDB Dark Matter
-                L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-                    maxZoom: 20
+                // Leaflet dark theme tile layers - Esri Dark Gray Canvas (no API key; CARTO basemaps now require one)
+                const esriCanvas = 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas';
+                L.tileLayer(`${esriCanvas}/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}`, {
+                    maxZoom: 20,
+                    maxNativeZoom: 16,
+                    attribution: 'Tiles &copy; Esri, HERE, Garmin, &copy; OpenStreetMap contributors'
+                }).addTo(map);
+                L.tileLayer(`${esriCanvas}/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}`, {
+                    maxZoom: 20,
+                    maxNativeZoom: 16
                 }).addTo(map);
 
                 window.addEventListener('resize', () => {
